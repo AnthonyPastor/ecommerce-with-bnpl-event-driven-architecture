@@ -19,6 +19,11 @@ sistema junto durante el desarrollo. Cada carpeta bajo `backend/apps/` está
 pensada para poder extraerse a su propio repo el día que un equipo se haga
 cargo de ese servicio en particular.
 
+Ver el [README del backend](backend/README.md) (microservicios, arquitectura
+de eventos Kafka/RabbitMQ, patrón outbox, flujos clave) y el
+[README del frontend](frontend/README.md) (stack, arquitectura del cliente,
+páginas) para el detalle de cada proyecto.
+
 Cada microservicio tiene su propio `CLAUDE.md` con el detalle de su
 arquitectura interna. `backend/packages/event-contracts/src/topics.ts` es la
 fuente de verdad del catálogo de eventos de Kafka y la topología de
