@@ -5,9 +5,9 @@ export interface SendEmailInput {
 }
 
 /**
- * Puerto abstracto del proveedor de email — repository pattern para poder
- * swappear la implementación (console -> SendGrid/SES) sin tocar el resto
- * del sistema. DI vía token explícito (EMAIL_PROVIDER).
+ * Abstract email provider port — repository pattern so the implementation
+ * can be swapped (console -> SendGrid/SES) without touching the rest of
+ * the system. DI via an explicit token (EMAIL_PROVIDER).
  */
 export abstract class EmailProviderPort {
   abstract send(input: SendEmailInput): Promise<void>;

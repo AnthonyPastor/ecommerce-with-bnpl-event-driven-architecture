@@ -11,19 +11,19 @@ export default function HomePage() {
   });
 
   if (isLoading) {
-    return <p className="text-sm text-gray-500">Cargando catálogo...</p>;
+    return <p className="text-sm text-gray-500">Loading catalog...</p>;
   }
 
   if (isError || !data) {
     return (
       <p className="text-sm text-red-600">
-        No pudimos cargar el catálogo. Intentá de nuevo más tarde.
+        We couldn&apos;t load the catalog. Please try again later.
       </p>
     );
   }
 
   if (data.items.length === 0) {
-    return <p className="text-sm text-gray-500">Todavía no hay productos cargados.</p>;
+    return <p className="text-sm text-gray-500">No products loaded yet.</p>;
   }
 
   return (

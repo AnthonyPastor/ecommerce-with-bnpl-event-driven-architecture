@@ -12,10 +12,10 @@ export interface OutboxEventInput {
 }
 
 /**
- * Guarda la entidad de dominio Y la fila de outbox en la MISMA transacción
- * (mismo QueryRunner, ya con `startTransaction()` corrido por el caller) —
- * o se guardan las dos o ninguna, resolviendo el dual-write problem entre
- * Postgres y Kafka. El caller es responsable de startTransaction/commit/rollback.
+ * Saves the domain entity AND the outbox row in the SAME transaction
+ * (same QueryRunner, with `startTransaction()` already run by the caller) —
+ * either both are saved or neither is, solving the dual-write problem between
+ * Postgres and Kafka. The caller is responsible for startTransaction/commit/rollback.
  */
 export async function saveWithOutbox<T extends ObjectLiteral>(
   queryRunner: QueryRunner,

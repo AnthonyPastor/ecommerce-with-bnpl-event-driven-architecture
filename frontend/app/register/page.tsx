@@ -23,11 +23,11 @@ export default function RegisterPage() {
 
   return (
     <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-xl font-semibold">Crear cuenta</h1>
+      <h1 className="mb-6 text-xl font-semibold">Create account</h1>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
           <label htmlFor="name" className="text-sm text-gray-700">
-            Nombre
+            Name
           </label>
           <input
             id="name"
@@ -52,7 +52,7 @@ export default function RegisterPage() {
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="password" className="text-sm text-gray-700">
-            Contraseña
+            Password
           </label>
           <input
             id="password"
@@ -65,14 +65,14 @@ export default function RegisterPage() {
           />
         </div>
         {mutation.isError && (
-          <p className="text-sm text-red-600">No pudimos crear la cuenta. Probá con otro email.</p>
+          <p className="text-sm text-red-600">We couldn&apos;t create the account. Try a different email.</p>
         )}
         <button
           type="submit"
           disabled={mutation.isPending}
           className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {mutation.isPending ? 'Creando cuenta...' : 'Crear cuenta'}
+          {mutation.isPending ? 'Creating account...' : 'Create account'}
         </button>
       </form>
     </div>

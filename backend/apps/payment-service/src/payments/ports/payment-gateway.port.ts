@@ -53,10 +53,10 @@ export interface NormalizedWebhookEvent {
 }
 
 /**
- * Puerto abstracto del payment gateway — repository pattern para poder
- * swappear la implementación (fake -> MercadoPago/PayPal) sin tocar
- * PaymentsService ni el resto del sistema. DI vía token explícito
- * (PAYMENT_GATEWAY), useFactory leyendo PAYMENT_GATEWAY_PROVIDER de env.
+ * Abstract port for the payment gateway — repository pattern so the
+ * implementation can be swapped (fake -> MercadoPago/PayPal) without touching
+ * PaymentsService or the rest of the system. DI via an explicit token
+ * (PAYMENT_GATEWAY), useFactory reading PAYMENT_GATEWAY_PROVIDER from env.
  */
 export abstract class PaymentGatewayPort {
   abstract authorize(input: AuthorizeInput): Promise<AuthorizeResult>;

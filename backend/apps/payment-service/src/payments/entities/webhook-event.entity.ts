@@ -1,9 +1,9 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, Unique } from 'typeorm';
 
 /**
- * Idempotencia de webhooks entrantes: (gateway, externalEventId) es único —
- * si el gateway reintenta la entrega del mismo evento, el segundo intento
- * se detecta acá y no se vuelve a procesar.
+ * Idempotency for incoming webhooks: (gateway, externalEventId) is unique —
+ * if the gateway retries delivery of the same event, the second attempt
+ * is detected here and not processed again.
  */
 @Entity('webhook_events')
 @Unique(['gateway', 'externalEventId'])

@@ -1,10 +1,10 @@
 import { api, registerAndLogin, waitUntil } from './client';
 
-// Camino no feliz: refund total después de capturado. Cubre la cascada
-// completa payment-service -> (Kafka) -> order-service + bnpl-service.
-describe('BNPL refund flow (sistema completo)', () => {
+// Non-happy path: full refund after capture. Covers the complete cascade
+// payment-service -> (Kafka) -> order-service + bnpl-service.
+describe('BNPL refund flow (full system)', () => {
   it(
-    'un refund total mueve el pago a REFUNDED, la orden a REFUNDED, y cancela el plan de cuotas',
+    'a full refund moves the payment to REFUNDED, the order to REFUNDED, and cancels the installment plan',
     async () => {
       const { token, userId } = await registerAndLogin('e2e-refund');
 

@@ -17,7 +17,7 @@ export function Header() {
         await apiClient.logout(refreshToken);
       }
     } catch {
-      // logout es best-effort: igual limpiamos la sesión local aunque falle el request
+      // logout is best-effort: clear the local session anyway even if the request fails
     } finally {
       clearAuth();
       router.push('/');
@@ -33,14 +33,14 @@ export function Header() {
         {user ? (
           <div className="flex items-center gap-4">
             <Link href="/cart" className="text-sm text-gray-600 hover:text-gray-900">
-              Carrito
+              Cart
             </Link>
-            <span className="text-sm text-gray-600">Hola, {user.name}</span>
+            <span className="text-sm text-gray-600">Hi, {user.name}</span>
             <button
               onClick={handleLogout}
               className="rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700"
             >
-              Cerrar sesión
+              Log out
             </button>
           </div>
         ) : (
@@ -48,7 +48,7 @@ export function Header() {
             href="/login"
             className="rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700"
           >
-            Iniciar sesión
+            Log in
           </Link>
         )}
       </div>

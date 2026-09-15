@@ -12,7 +12,7 @@ export enum PaymentStatus {
   CANCELLED = 'CANCELLED',
 }
 
-/** Mapa de transiciones válidas de la state machine de Payment/Transaction. */
+/** Map of valid transitions for the Payment/Transaction state machine. */
 export const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.PENDING]: [
     PaymentStatus.AUTHORIZED,

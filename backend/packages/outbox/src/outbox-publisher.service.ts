@@ -30,7 +30,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  /** Publica hasta 50 filas pendientes. Devuelve cuántas publicó (para tests/debug). */
+  /** Publishes up to 50 pending rows. Returns how many it published (for tests/debug). */
   async publishPending(): Promise<number> {
     const pending = await this.repo.find({
       where: { publishedAt: IsNull() },

@@ -42,4 +42,4 @@ Needs `api-gateway` (and everything behind it) running and reachable at `NEXT_PU
 
 ### Money is always in cents
 
-Every price/amount from the backend is `*Cents` (integer). `lib/format.ts`'s `formatPrice(priceCents, currency)` (divides by 100, formats via cached `Intl.NumberFormat` per currency, locale `es-AR`) is the only place that should do that conversion — don't `/ 100` inline elsewhere.
+Every price/amount from the backend is `*Cents` (integer). `lib/format.ts`'s `formatPrice(priceCents, currency)` (divides by 100, formats via cached `Intl.NumberFormat` per currency, locale `en-US`) is the only place that should do that conversion — don't `/ 100` inline elsewhere.

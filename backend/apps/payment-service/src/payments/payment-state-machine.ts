@@ -3,7 +3,7 @@ import { UnprocessableEntityException } from '@nestjs/common';
 
 export { PAYMENT_TRANSITIONS, PaymentStatus };
 
-/** Lanza si `from -> to` no es una transición válida según PAYMENT_TRANSITIONS. */
+/** Throws if `from -> to` is not a valid transition per PAYMENT_TRANSITIONS. */
 export function assertTransition(from: PaymentStatus, to: PaymentStatus): void {
   const allowed = PAYMENT_TRANSITIONS[from] ?? [];
   if (!allowed.includes(to)) {

@@ -7,10 +7,10 @@ export interface RequestContext {
 }
 
 /**
- * Wrapper de AsyncLocalStorage: guarda { correlationId, transactionId } una vez
- * por request/mensaje y lo deja disponible en toda la cadena async subsiguiente
- * (logger, clientes HTTP salientes, producers de Kafka/RabbitMQ) sin pasarlo
- * manualmente por parámetro en cada función.
+ * AsyncLocalStorage wrapper: stores { correlationId, transactionId } once per
+ * request/message and makes it available throughout the subsequent async
+ * chain (logger, outbound HTTP clients, Kafka/RabbitMQ producers) without
+ * manually passing it as a parameter through every function.
  */
 @Injectable()
 export class RequestContextService {
@@ -32,7 +32,7 @@ export class RequestContextService {
     return this.als.getStore()?.transactionId;
   }
 
-  /** Actualiza el transactionId del contexto activo (ej. una vez resuelto desde un webhook). */
+  /** Updates the transactionId of the active context (e.g. once resolved from a webhook). */
   setTransactionId(transactionId: string): void {
     const store = this.als.getStore();
     if (store) {

@@ -4,10 +4,10 @@ import { RequestContextModule } from './request-context.module';
 import { RequestContextService } from './request-context.service';
 
 /**
- * Logger estructurado (pino) que inyecta correlationId/transactionId en cada
- * línea automáticamente, leyéndolos del contexto activo de RequestContextService
- * (la MISMA instancia que abre CorrelationIdMiddleware) — no hace falta pasarlos
- * a mano en cada logger.log(...).
+ * Structured logger (pino) that automatically injects correlationId/transactionId
+ * into every line, reading them from the active context of RequestContextService
+ * (the SAME instance that CorrelationIdMiddleware opens) — no need to pass them
+ * by hand on every logger.log(...).
  */
 @Module({
   imports: [

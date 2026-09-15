@@ -58,17 +58,17 @@ export default function OrderConfirmationPage() {
     refetchInterval: (query) => (query.state.data ? false : 1000),
   });
 
-  if (orderQuery.isLoading) return <main className="mx-auto max-w-2xl px-4 py-8">Cargando orden...</main>;
+  if (orderQuery.isLoading) return <main className="mx-auto max-w-2xl px-4 py-8">Loading order...</main>;
   if (orderQuery.isError || !orderQuery.data) {
-    return <main className="mx-auto max-w-2xl px-4 py-8 text-red-600">No se encontró la orden.</main>;
+    return <main className="mx-auto max-w-2xl px-4 py-8 text-red-600">Order not found.</main>;
   }
 
   const order = orderQuery.data;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="mb-2 text-xl font-semibold text-gray-900">Orden #{order.id.slice(0, 8)}</h1>
-      <p className="mb-6 text-sm text-gray-500">Estado de la orden: {order.status}</p>
+      <h1 className="mb-2 text-xl font-semibold text-gray-900">Order #{order.id.slice(0, 8)}</h1>
+      <p className="mb-6 text-sm text-gray-500">Order status: {order.status}</p>
 
       <ul className="mb-6 divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
         {order.items.map((item) => (
@@ -92,19 +92,19 @@ export default function OrderConfirmationPage() {
           disabled={pay.isPending}
           className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {pay.isPending ? 'Iniciando pago...' : 'Pagar con BNPL'}
+          {pay.isPending ? 'Starting payment...' : 'Pay with BNPL'}
         </button>
       )}
-      {pay.isError && <p className="mt-2 text-sm text-red-600">No se pudo iniciar el pago.</p>}
+      {pay.isError && <p className="mt-2 text-sm text-red-600">We couldn&apos;t start the payment.</p>}
 
       {paymentQuery.data && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 text-sm">
           <p>
-            Estado del pago: <span className="font-medium">{paymentQuery.data.status}</span>
+            Payment status: <span className="font-medium">{paymentQuery.data.status}</span>
           </p>
           {!isCaptured && (
             <p className="mt-1 text-xs text-gray-500">
-              Confirmando la captura con el gateway de pago (esto puede tardar unos segundos)...
+              Confirming the capture with the payment gateway (this can take a few seconds)...
             </p>
           )}
         </div>
@@ -112,16 +112,16 @@ export default function OrderConfirmationPage() {
 
       {isCaptured && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-semibold text-gray-900">Plan de cuotas</h2>
-          {!planQuery.data && <p className="text-xs text-gray-500">Generando tu plan de cuotas...</p>}
+          <h2 className="mb-2 text-sm font-semibold text-gray-900">Installment plan</h2>
+          {!planQuery.data && <p className="text-xs text-gray-500">Generating your installment plan...</p>}
           {planQuery.data && (
             <ul className="divide-y divide-gray-200">
               {planQuery.data.installments.map((inst) => (
                 <li key={inst.id} className="flex items-center justify-between py-2 text-sm">
-                  <span>Cuota {inst.installmentNumber}</span>
+                  <span>Installment {inst.installmentNumber}</span>
                   <span>{formatPrice(inst.amountCents, planQuery.data!.currency)}</span>
                   <span className="text-xs text-gray-500">
-                    Vence {new Date(inst.dueDate).toLocaleDateString('es-AR')}
+                    Due {new Date(inst.dueDate).toLocaleDateString('en-US')}
                   </span>
                 </li>
               ))}

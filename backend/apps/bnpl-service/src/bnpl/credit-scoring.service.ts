@@ -10,9 +10,10 @@ export class CreditScoringService {
   ) {}
 
   /**
-   * Stub de scoring: siempre aprueba. Un scoring real evaluaría historial de
-   * pagos, ingresos declarados, buró de crédito externo, etc. — este es el
-   * punto de extensión para eso el día que se reemplace el stub.
+   * Scoring stub: always approves. A real scoring implementation would
+   * evaluate payment history, declared income, an external credit bureau,
+   * etc. — this is the extension point for that, for the day the stub gets
+   * replaced.
    */
   async scoreUser(_userId: string): Promise<{ approved: boolean }> {
     return { approved: true };

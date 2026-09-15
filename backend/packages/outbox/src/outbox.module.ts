@@ -5,7 +5,7 @@ import { OutboxPublisherService } from './outbox-publisher.service';
 import { OUTBOX_POLL_INTERVAL_MS, OUTBOX_PRODUCER_NAME } from './outbox.constants';
 
 export interface OutboxModuleOptions {
-  /** Nombre del servicio que aparece en `envelope.producer` (ej. 'order-service'). */
+  /** Name of the service that appears in `envelope.producer` (e.g. 'order-service'). */
   producerName: string;
   pollIntervalMs?: number;
 }

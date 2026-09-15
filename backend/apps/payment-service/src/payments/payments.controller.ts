@@ -17,19 +17,19 @@ export class PaymentsController {
     return this.paymentsService.findById(id);
   }
 
-  /** Dev: dispara un refund (total u parcial) contra el gateway configurado. */
+  /** Dev: triggers a refund (full or partial) against the configured gateway. */
   @Post(':id/refund')
   refund(@Param('id') id: string, @Body() dto: RefundPaymentDto) {
     return this.paymentsService.refundPayment(id, dto.amountCents);
   }
 
-  /** Dev: cancela (void) una transacción autorizada pero no capturada. */
+  /** Dev: cancels (voids) an authorized but not-yet-captured transaction. */
   @Post(':id/void')
   void(@Param('id') id: string) {
     return this.paymentsService.voidPayment(id);
   }
 
-  /** Dev: simula que la red de tarjetas notificó un chargeback. */
+  /** Dev: simulates the card network notifying a chargeback. */
   @Post(':id/simulate-chargeback')
   simulateChargeback(@Param('id') id: string) {
     return this.paymentsService.simulateChargeback(id);

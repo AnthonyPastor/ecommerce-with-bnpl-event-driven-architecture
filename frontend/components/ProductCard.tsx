@@ -47,7 +47,7 @@ export function ProductCard({ product }: { product: Product }) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <span className="text-sm text-gray-400">Sin imagen</span>
+          <span className="text-sm text-gray-400">No image</span>
         )}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-4">
@@ -61,9 +61,9 @@ export function ProductCard({ product }: { product: Product }) {
           disabled={addToCart.isPending}
           className="mt-2 rounded-md bg-gray-900 px-3 py-2 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {addToCart.isPending ? 'Agregando...' : 'Agregar al carrito'}
+          {addToCart.isPending ? 'Adding...' : 'Add to cart'}
         </button>
-        {addToCart.isError && <p className="text-xs text-red-600">No se pudo agregar</p>}
+        {addToCart.isError && <p className="text-xs text-red-600">Couldn&apos;t add it</p>}
       </div>
     </div>
   );

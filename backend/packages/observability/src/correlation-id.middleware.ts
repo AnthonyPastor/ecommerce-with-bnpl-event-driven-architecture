@@ -7,9 +7,9 @@ export const CORRELATION_ID_HEADER = 'x-correlation-id';
 export const TRANSACTION_ID_HEADER = 'x-transaction-id';
 
 /**
- * Toma (o genera) el correlationId/transactionId de la request entrante,
- * corre el resto del pipeline dentro del contexto de RequestContextService,
- * y los devuelve en la response para que el caller pueda loguearlos.
+ * Takes (or generates) the correlationId/transactionId from the incoming
+ * request, runs the rest of the pipeline inside RequestContextService's
+ * context, and returns them on the response so the caller can log them.
  */
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {

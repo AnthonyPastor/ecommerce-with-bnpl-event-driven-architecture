@@ -15,7 +15,7 @@ export default function LoginPage() {
   const mutation = useMutation({
     mutationFn: () => apiClient.login({ email, password }),
     onSuccess: async (tokens) => {
-      // seteamos el token primero para que apiClient.me() (auth: true) lo pueda leer del store
+      // set the token first so apiClient.me() (auth: true) can read it from the store
       useAuthStore.setState({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -33,7 +33,7 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-xl font-semibold">Iniciar sesión</h1>
+      <h1 className="mb-6 text-xl font-semibold">Log in</h1>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
           <label htmlFor="email" className="text-sm text-gray-700">
@@ -50,7 +50,7 @@ export default function LoginPage() {
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="password" className="text-sm text-gray-700">
-            Contraseña
+            Password
           </label>
           <input
             id="password"
@@ -62,20 +62,20 @@ export default function LoginPage() {
           />
         </div>
         {mutation.isError && (
-          <p className="text-sm text-red-600">Email o contraseña incorrectos.</p>
+          <p className="text-sm text-red-600">Incorrect email or password.</p>
         )}
         <button
           type="submit"
           disabled={mutation.isPending}
           className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {mutation.isPending ? 'Ingresando...' : 'Ingresar'}
+          {mutation.isPending ? 'Logging in...' : 'Log in'}
         </button>
       </form>
       <p className="mt-4 text-sm text-gray-600">
-        ¿No tenés cuenta?{' '}
+        Don&apos;t have an account?{' '}
         <a href="/register" className="font-medium text-gray-900 underline">
-          Registrate
+          Sign up
         </a>
       </p>
     </div>

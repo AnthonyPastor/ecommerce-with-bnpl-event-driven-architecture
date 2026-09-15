@@ -19,11 +19,11 @@ export class OrdersService {
   ) {}
 
   /**
-   * Crea la Order + sus items + el evento `order.order.created.v1` en la
-   * MISMA transacción SQL (patrón outbox) — o se guarda todo, o nada.
-   * El `transactionId` de negocio nace acá (= order.id) y viaja en el
-   * evento para que todo lo que reaccione a esta orden (payment-service,
-   * bnpl-service) comparta el mismo id de principio a fin.
+   * Creates the Order + its items + the `order.order.created.v1` event in the
+   * SAME SQL transaction (outbox pattern) — either everything is saved, or
+   * nothing is. The business `transactionId` is born here (= order.id) and
+   * travels in the event so that everything reacting to this order
+   * (payment-service, bnpl-service) shares the same id end to end.
    */
   async createOrder(dto: CreateOrderDto): Promise<Order> {
     const totalCents = dto.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
@@ -33,9 +33,9 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
-      // Generamos el id nosotros (en vez de dejar que lo asigne el DEFAULT de
-      // Postgres) porque lo necesitamos ANTES del save para usarlo como
-      // aggregateId/transactionId del evento de outbox en la misma llamada.
+      // We generate the id ourselves (instead of letting Postgres' DEFAULT
+      // assign it) because we need it BEFORE the save to use it as the
+      // aggregateId/transactionId of the outbox event in the same call.
       const order = queryRunner.manager.create(Order, {
         id: randomUUID(),
         userId: dto.userId,
@@ -79,8 +79,8 @@ export class OrdersService {
 
       await queryRunner.commitTransaction();
 
-      // El transactionId de negocio recién nace acá (order.id) — lo dejamos
-      // en el contexto para que el resto del request (logs, response) lo tenga.
+      // The business transactionId is only born here (order.id) — we set it
+      // on the context so the rest of the request (logs, response) has it.
       this.requestContext.setTransactionId(savedOrder.id);
 
       return savedOrder;
@@ -104,7 +104,7 @@ export class OrdersService {
     return this.orders.find({ where: { userId }, relations: ['items'], order: { createdAt: 'DESC' } });
   }
 
-  /** Reacción a `payment.transaction.refunded.v1` (refund total): marca la orden como reembolsada. */
+  /** Reaction to `payment.transaction.refunded.v1` (full refund): marks the order as refunded. */
   async markRefunded(orderId: string): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -114,7 +114,7 @@ export class OrdersService {
       const order = await queryRunner.manager.findOneOrFail(Order, { where: { id: orderId } });
       if (order.status === OrderStatus.REFUNDED) {
         await queryRunner.rollbackTransaction();
-        return; // idempotente: ya procesado
+        return; // idempotent: already processed
       }
 
       const fromStatus = order.status;

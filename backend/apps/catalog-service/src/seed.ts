@@ -5,8 +5,8 @@ import { Product } from './catalog/entities/product.entity';
 import { ProductVariant } from './catalog/entities/product-variant.entity';
 
 /**
- * Seed manual de datos de ejemplo. Correr con `pnpm --filter catalog-service run seed`
- * contra la DB ya levantada por docker-compose.
+ * Manual seed of sample data. Run with `pnpm --filter catalog-service run seed`
+ * against the DB already started by docker-compose.
  */
 async function seed() {
   const dataSource = new DataSource({
@@ -27,9 +27,9 @@ async function seed() {
   const variantRepo = dataSource.getRepository(ProductVariant);
 
   const categoriesData = [
-    { name: 'Electrónica', slug: 'electronica' },
-    { name: 'Indumentaria', slug: 'indumentaria' },
-    { name: 'Hogar', slug: 'hogar' },
+    { name: 'Electronics', slug: 'electronics' },
+    { name: 'Apparel', slug: 'apparel' },
+    { name: 'Home', slug: 'home' },
   ];
 
   const categories: Category[] = [];
@@ -41,7 +41,7 @@ async function seed() {
     categories.push(category);
   }
 
-  const [electronica, indumentaria, hogar] = categories;
+  const [electronics, apparel, home] = categories;
 
   const productsData: Array<{
     name: string;
@@ -52,36 +52,36 @@ async function seed() {
     variants?: Array<{ name: string; priceCents: number; stock: number }>;
   }> = [
     {
-      name: 'Auriculares Bluetooth',
-      description: 'Auriculares inalámbricos con cancelación de ruido.',
+      name: 'Bluetooth Headphones',
+      description: 'Wireless headphones with noise cancellation.',
       priceCents: 8999,
-      category: electronica,
+      category: electronics,
       variants: [
-        { name: 'Negro', priceCents: 8999, stock: 25 },
-        { name: 'Blanco', priceCents: 8999, stock: 15 },
+        { name: 'Black', priceCents: 8999, stock: 25 },
+        { name: 'White', priceCents: 8999, stock: 15 },
       ],
     },
     {
-      name: 'Smartwatch Serie 5',
-      description: 'Reloj inteligente con monitor de ritmo cardíaco.',
+      name: 'Smartwatch Series 5',
+      description: 'Smartwatch with heart-rate monitor.',
       priceCents: 19999,
-      category: electronica,
+      category: electronics,
       variants: [
         { name: '40mm', priceCents: 19999, stock: 10 },
         { name: '44mm', priceCents: 21999, stock: 8 },
       ],
     },
     {
-      name: 'Parlante Portátil',
-      description: 'Parlante Bluetooth resistente al agua.',
+      name: 'Portable Speaker',
+      description: 'Water-resistant Bluetooth speaker.',
       priceCents: 5499,
-      category: electronica,
+      category: electronics,
     },
     {
-      name: 'Remera Básica',
-      description: 'Remera de algodón 100%.',
+      name: 'Basic T-Shirt',
+      description: '100% cotton t-shirt.',
       priceCents: 2499,
-      category: indumentaria,
+      category: apparel,
       variants: [
         { name: 'S', priceCents: 2499, stock: 30 },
         { name: 'M', priceCents: 2499, stock: 40 },
@@ -89,35 +89,35 @@ async function seed() {
       ],
     },
     {
-      name: 'Campera de Abrigo',
-      description: 'Campera impermeable para invierno.',
+      name: 'Winter Jacket',
+      description: 'Waterproof winter jacket.',
       priceCents: 12999,
-      category: indumentaria,
+      category: apparel,
       variants: [
         { name: 'M', priceCents: 12999, stock: 12 },
         { name: 'L', priceCents: 12999, stock: 9 },
       ],
     },
     {
-      name: 'Zapatillas Urbanas',
-      description: 'Zapatillas casuales para uso diario.',
+      name: 'Urban Sneakers',
+      description: 'Casual sneakers for everyday wear.',
       priceCents: 15999,
-      category: indumentaria,
+      category: apparel,
     },
     {
-      name: 'Juego de Sábanas',
-      description: 'Sábanas 100% algodón, plaza y media.',
+      name: 'Sheet Set',
+      description: '100% cotton sheet set, full size.',
       priceCents: 7499,
-      category: hogar,
+      category: home,
     },
     {
-      name: 'Cafetera Eléctrica',
-      description: 'Cafetera de filtro de 12 tazas.',
+      name: 'Electric Coffee Maker',
+      description: '12-cup drip coffee maker.',
       priceCents: 10999,
-      category: hogar,
+      category: home,
       variants: [
-        { name: 'Negra', priceCents: 10999, stock: 18 },
-        { name: 'Plateada', priceCents: 11999, stock: 6 },
+        { name: 'Black', priceCents: 10999, stock: 18 },
+        { name: 'Silver', priceCents: 11999, stock: 6 },
       ],
     },
   ];
@@ -146,12 +146,12 @@ async function seed() {
   }
 
   // eslint-disable-next-line no-console
-  console.log('Seed completo.');
+  console.log('Seed complete.');
   await dataSource.destroy();
 }
 
 seed().catch((err) => {
   // eslint-disable-next-line no-console
-  console.error('Seed falló:', err);
+  console.error('Seed failed:', err);
   process.exit(1);
 });

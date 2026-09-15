@@ -15,13 +15,13 @@ import {
 } from '../ports/payment-gateway.port';
 
 /**
- * Implementación fake del payment gateway: `authorize` responde sync
- * (como haría cualquier gateway real al autorizar), pero la confirmación de
- * captura llega ASYNC vía un webhook simulado que este mismo gateway se
- * auto-dispara (self-loopback HTTP real a `PAYMENT_SERVICE_SELF_URL`) con un
- * delay corto — así se ejercita el camino asíncrono real (webhook controller
- * -> idempotencia -> RabbitMQ -> consumer -> transición de estado) desde el
- * día uno, no solo el happy path síncrono.
+ * Fake implementation of the payment gateway: `authorize` responds sync
+ * (as any real gateway would when authorizing), but capture confirmation
+ * arrives ASYNC via a simulated webhook that this same gateway
+ * self-triggers (a real self-loopback HTTP call to `PAYMENT_SERVICE_SELF_URL`)
+ * after a short delay — this exercises the real async path (webhook controller
+ * -> idempotency -> RabbitMQ -> consumer -> state transition) from
+ * day one, not just the sync happy path.
  */
 @Injectable()
 export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDestroy {
