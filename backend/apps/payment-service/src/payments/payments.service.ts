@@ -9,7 +9,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { TransactionStatusHistory } from './entities/transaction-status-history.entity';
 import { Transaction } from './entities/transaction.entity';
 import { NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
-import { PaymentStatus, assertTransition } from './payment-state-machine';
+import { PaymentStatus, assertTransition, isTerminalPaymentStatus } from './payment-state-machine';
 
 interface TransactionPatch {
   gatewayReference?: string;
@@ -30,37 +30,54 @@ export class PaymentsService {
   /**
    * Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway.
    * Guards against paying the same order twice: any existing transaction for
-   * `orderId` other than a failed authorize/capture/void blocks a new attempt —
-   * a failed or voided one must remain retryable, a captured/in-flight one must not.
+   * `orderId` that isn't terminal (per PAYMENT_TRANSITIONS) blocks a new attempt —
+   * a failed, voided, refunded, or charged-back one must remain retryable, a
+   * captured/in-flight one must not.
+   *
+   * The guard-check and the PENDING insert run inside one DB transaction, guarded
+   * by a Postgres advisory lock keyed on `orderId`. A plain row lock can't help
+   * here because on the very first payment for an order there's no row yet to
+   * lock — the advisory lock serializes concurrent callers on the key itself, so
+   * a second concurrent request can't pass the "no blocking transaction" check
+   * before the first one's row is committed.
    */
   async createPayment(dto: CreatePaymentDto): Promise<Transaction> {
-    const existingForOrder = await this.transactions.find({ where: { orderId: dto.orderId } });
-    const nonBlockingStatuses = new Set([
-      PaymentStatus.AUTHORIZATION_FAILED,
-      PaymentStatus.CAPTURE_FAILED,
-      PaymentStatus.VOIDED,
-    ]);
-    const blocking = existingForOrder.find((t) => !nonBlockingStatuses.has(t.status));
-    if (blocking) {
-      throw new ConflictException(`Order ${dto.orderId} already has a payment in status ${blocking.status}`);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    let pending: Transaction;
+    try {
+      await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [dto.orderId]);
+
+      const existingForOrder = await queryRunner.manager.find(Transaction, { where: { orderId: dto.orderId } });
+      const blocking = existingForOrder.find((t) => !isTerminalPaymentStatus(t.status));
+      if (blocking) {
+        throw new ConflictException(`Order ${dto.orderId} already has a payment in status ${blocking.status}`);
+      }
+
+      pending = queryRunner.manager.create(Transaction, {
+        id: randomUUID(),
+        orderId: dto.orderId,
+        userId: dto.userId,
+        amountCents: dto.amountCents,
+        currency: dto.currency ?? 'USD',
+        status: PaymentStatus.PENDING,
+        paymentMethod: dto.paymentMethod ?? PaymentMethod.INSTALLMENTS,
+        gatewayProvider: 'fake',
+        gatewayReference: null,
+        refundedAmountCents: 0,
+      });
+      await queryRunner.manager.save(pending);
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
 
-    const id = randomUUID();
-    const currency = dto.currency ?? 'USD';
-
-    const pending = this.transactions.create({
-      id,
-      orderId: dto.orderId,
-      userId: dto.userId,
-      amountCents: dto.amountCents,
-      currency,
-      status: PaymentStatus.PENDING,
-      paymentMethod: dto.paymentMethod ?? PaymentMethod.INSTALLMENTS,
-      gatewayProvider: 'fake',
-      gatewayReference: null,
-      refundedAmountCents: 0,
-    });
-    await this.transactions.save(pending);
+    const { id, currency } = pending;
 
     try {
       const result = await this.gateway.authorize({
@@ -241,8 +258,9 @@ export class PaymentsService {
     return this.transactions.findOne({ where: { gatewayReference } });
   }
 
-  async findByOrderId(orderId: string): Promise<Transaction[]> {
-    return this.transactions.find({ where: { orderId }, order: { createdAt: 'DESC' } });
+  /** Scoped to `userId` so a caller can only ever see their own transactions for the order — see `PaymentsController.findByOrderId`. */
+  async findByOrderId(orderId: string, userId: string): Promise<Transaction[]> {
+    return this.transactions.find({ where: { orderId, userId }, order: { createdAt: 'DESC' } });
   }
 
   /**

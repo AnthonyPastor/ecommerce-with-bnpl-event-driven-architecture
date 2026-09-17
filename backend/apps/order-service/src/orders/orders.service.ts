@@ -13,16 +13,30 @@ import { Order } from './entities/order.entity';
 /**
  * What the client actually cares about: did this order get paid, and how.
  * Computed here (not stored) so it's always derived from `status` +
- * `paymentMethod` rather than risking the two drifting apart.
+ * `paymentMethod` + `paymentIncident` rather than risking them drifting apart.
  * `INSTALLMENTS_PENDING` is honest about a known gap: no installment is ever
  * actually marked PAID yet (no "charge the next installment" job exists), so
  * an installments order never legitimately reaches a "paid off" state today.
+ * `PARTIALLY_REFUNDED`/`DISPUTED`/`CHARGEBACK` reflect payment-service's own
+ * post-capture states (see `payment-events.consumer.ts`) and take priority
+ * over the CONFIRMED-derived PAID/INSTALLMENTS_PENDING split — the order
+ * lifecycle `status` alone can't capture those, since payment state keeps
+ * moving after CONFIRMED.
  */
-export type OrderPaymentStatus = 'UNPAID' | 'PAID' | 'INSTALLMENTS_PENDING';
+export type OrderPaymentStatus =
+  | 'UNPAID'
+  | 'PAID'
+  | 'INSTALLMENTS_PENDING'
+  | 'PARTIALLY_REFUNDED'
+  | 'DISPUTED'
+  | 'CHARGEBACK';
 
 export type OrderWithPaymentStatus = Order & { paymentStatus: OrderPaymentStatus };
 
 function paymentStatusFor(order: Order): OrderPaymentStatus {
+  if (order.paymentIncident) {
+    return order.paymentIncident;
+  }
   if (order.status !== OrderStatus.CONFIRMED) {
     return 'UNPAID';
   }
@@ -124,14 +138,24 @@ export class OrdersService {
     return orders.map((order) => ({ ...order, paymentStatus: paymentStatusFor(order) }));
   }
 
-  /** Reaction to `payment.transaction.captured.v1`: marks the order as confirmed once its payment succeeds. */
+  /**
+   * Reaction to `payment.transaction.captured.v1`: marks the order as confirmed
+   * once its payment succeeds. Kafka delivery is at-least-once, so a duplicate
+   * delivery for the same order can race a prior one still mid-transaction —
+   * `pessimistic_write` takes a row lock on the SELECT so a concurrent call
+   * blocks until the first commits, then sees the already-CONFIRMED status and
+   * takes the idempotent no-op path below instead of double-confirming.
+   */
   async markConfirmed(orderId: string, paymentMethod: PaymentMethod | null): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const order = await queryRunner.manager.findOneOrFail(Order, { where: { id: orderId } });
+      const order = await queryRunner.manager.findOneOrFail(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (order.status !== OrderStatus.CREATED) {
         await queryRunner.rollbackTransaction();
         return; // idempotent: already confirmed, or moved past CREATED some other way
@@ -173,7 +197,10 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
-      const order = await queryRunner.manager.findOneOrFail(Order, { where: { id: orderId } });
+      const order = await queryRunner.manager.findOneOrFail(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (order.status === OrderStatus.REFUNDED) {
         await queryRunner.rollbackTransaction();
         return; // idempotent: already processed
@@ -181,6 +208,7 @@ export class OrdersService {
 
       const fromStatus = order.status;
       order.status = OrderStatus.REFUNDED;
+      order.paymentIncident = null; // a full refund supersedes any prior dispute/chargeback/partial-refund signal
 
       const saved = await saveWithOutbox(queryRunner, order, {
         eventType: KafkaTopics.order.refunded,
@@ -204,6 +232,24 @@ export class OrdersService {
       throw err;
     } finally {
       await queryRunner.release();
+    }
+  }
+
+  /**
+   * Reaction to `payment.transaction.partially_refunded.v1` / `.dispute_opened.v1`
+   * / `.chargeback_received.v1`: mirrors the payment health signal onto the
+   * order so the computed `paymentStatus` reflects it. This isn't itself an
+   * outbox/domain event — nothing else reacts to order-service's copy of this
+   * signal, only to payment-service's own topics (see that service's CLAUDE.md) —
+   * so a plain idempotent update is enough, no transactional outbox needed.
+   */
+  async markPaymentIncident(
+    orderId: string,
+    incident: 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK',
+  ): Promise<void> {
+    const result = await this.orders.update({ id: orderId }, { paymentIncident: incident });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Order ${orderId} not found`);
     }
   }
 }

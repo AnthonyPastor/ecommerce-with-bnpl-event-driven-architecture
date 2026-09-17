@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { createProxyMiddleware, fixRequestBody, type RequestHandler } from 'http-proxy-middleware';
+import { createProxyMiddleware, type RequestHandler } from 'http-proxy-middleware';
 
 export interface ProxyForwardOptions {
   target: string;
@@ -27,13 +27,6 @@ export class ProxyService {
         target: options.target,
         changeOrigin: true,
         pathRewrite: { [options.stripPrefix]: '' },
-        // Nest's global body-parser already drains the request stream before
-        // this handler runs (unlike the old raw-Express setup, where the
-        // proxy intercepted requests before Nest's own middleware pipeline
-        // ever touched them) — re-serialize the already-parsed req.body onto
-        // the proxied request, or POST/PUT/PATCH bodies never reach the
-        // downstream service and the request hangs.
-        onProxyReq: fixRequestBody,
       });
       this.middlewares.set(key, middleware);
     }

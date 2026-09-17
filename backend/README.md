@@ -26,7 +26,7 @@ the client.
 | `auth-service` | 3001 | `auth_db` | Identity: registration, login, JWT access/refresh, session revocation. |
 | `catalog-service` | 3002 | `catalog_db` | Catalog: categories, products, variants. Read-only for the rest of the system. |
 | `cart-service` | 3003 | `cart_db` | Shopping cart and checkout (synchronous call to `order-service`). |
-| `order-service` | 3004 | `order_db` | Orders: creation, and reacting to refunds. This is where the business `transactionId` is born. |
+| `order-service` | 3004 | `order_db` | Orders: creation, and reacting to payment-service's events (confirms, refunds, mirrors dispute/chargeback/partial-refund status). This is where the business `transactionId` is born. |
 | `payment-service` | 3005 | `payment_db` | Payment state machine, gateway abstraction, async webhook pipeline. The most complex service. |
 | `bnpl-service` | 3006 | `bnpl_db` | The "buy now, pay later" logic: credit scoring, installment plans, reacting to the payment lifecycle. |
 | `notification-service` | 3007 | `notification_db` | Bridges domain events → email (Kafka → RabbitMQ → send). |
@@ -67,15 +67,16 @@ This guarantees that every event Kafka ends up seeing corresponds to a change th
 | Topic | Producer | Consumers |
 |---|---|---|
 | `order.order.created.v1` | order-service | notification-service |
-| `order.order.confirmed.v1` / `cancelled.v1` | order-service | — (defined, no flow triggers them yet) |
+| `order.order.confirmed.v1` | order-service | — (defined; consumed by nothing today, but no longer untriggered — see below) |
+| `order.order.cancelled.v1` | order-service | — (defined, no flow triggers it yet) |
 | `order.order.refunded.v1` | order-service | — |
-| `payment.transaction.authorized.v1` / `.captured.v1` | payment-service | bnpl-service (captured → activates the installment plan) |
+| `payment.transaction.authorized.v1` / `.captured.v1` | payment-service | bnpl-service (captured → activates the installment plan), order-service (captured → confirms the order, emits `order.order.confirmed.v1`) |
 | `payment.transaction.authorization_failed.v1` / `.capture_failed.v1` | payment-service | — |
 | `payment.transaction.voided.v1` / `.cancelled.v1` | payment-service | — |
-| `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan) |
-| `payment.transaction.refunded.v1` | payment-service | order-service (marks the order), bnpl-service (cancels the plan), notification-service (email) |
-| `payment.transaction.dispute_opened.v1` | payment-service | — |
-| `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag) |
+| `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan), order-service (mirrors the signal onto the order's payment status) |
+| `payment.transaction.refunded.v1` | payment-service | order-service (marks the order `REFUNDED`), bnpl-service (cancels the plan), notification-service (email) |
+| `payment.transaction.dispute_opened.v1` | payment-service | order-service (mirrors the signal onto the order's payment status) |
+| `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag), order-service (mirrors the signal onto the order's payment status) |
 | `bnpl.installment_plan.created.v1` / `.activated.v1` / `.adjusted.v1` / `.cancelled.v1` | bnpl-service | — |
 | `bnpl.installment.due.v1` / `.paid.v1` / `.overdue.v1` / `.defaulted.v1` | bnpl-service (defined) | notification-service (`due.v1`) |
 | `cart.cart.checked_out.v1` | — (deferred; see below) | — |
@@ -223,13 +224,18 @@ sequenceDiagram
         Payment--)Notif: sends "payment_refunded" email
     else partial refund
         Note right of Payment: Kafka: payment.transaction.partially_refunded.v1
+        Payment--)Order: markPaymentIncident('PARTIALLY_REFUNDED')
         Payment--)Bnpl: adjustPlanForPartialRefund() → plan ADJUSTED
     end
 ```
 
-`order-service` only reacts to a **full** refund (`.refunded.v1`) — a partial
-refund doesn't change the order's status. `bnpl-service` reacts to both,
-with a different method for each.
+A **full** refund (`.refunded.v1`) moves the order to `REFUNDED` (and clears
+any dispute/chargeback/partial-refund signal recorded on it). A **partial**
+refund doesn't change `Order.status` — it only mirrors onto
+`Order.paymentIncident` (`markPaymentIncident`), which the order's computed
+`paymentStatus` reads first, so the client sees `PARTIALLY_REFUNDED` instead
+of a stale `PAID`/`INSTALLMENTS_PENDING`. `bnpl-service` reacts to both, with
+a different method for each.
 
 ### 3. Void, chargeback, and authorization failure (prose — single-service, no fan-out)
 
@@ -242,10 +248,13 @@ with a different method for each.
   card network, not the merchant, so this endpoint deliberately **doesn't**
   call `PaymentGatewayPort` at all — it fires two direct, sequential
   transitions in the same request: `CAPTURED → DISPUTED`
-  (`dispute_opened.v1`, no consumer yet) → `DISPUTED → CHARGEBACK`
-  (`chargeback_received.v1`). `bnpl-service` reacts by putting the plan on
-  `DISPUTED_HOLD` and flagging the credit profile for rescoring — without
-  publishing any new event of its own.
+  (`dispute_opened.v1`) → `DISPUTED → CHARGEBACK` (`chargeback_received.v1`).
+  `bnpl-service` reacts by putting the plan on `DISPUTED_HOLD` and flagging
+  the credit profile for rescoring — without publishing any new event of its
+  own. `order-service` reacts to both topics by mirroring the signal onto
+  `Order.paymentIncident` (`markPaymentIncident`), so the order's computed
+  payment status reflects `DISPUTED`/`CHARGEBACK` instead of staying at
+  whatever it was when the order was last confirmed.
 - **Authorization failure**: if the synchronous `PaymentGatewayPort.authorize()`
   call in `createPayment()` throws, `applyTransition(AUTHORIZATION_FAILED)`
   still runs (outbox → `payment.transaction.authorization_failed.v1`) before

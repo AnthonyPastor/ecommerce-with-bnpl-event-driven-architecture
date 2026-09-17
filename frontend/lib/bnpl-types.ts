@@ -22,6 +22,22 @@ export const TERMINAL_PAYMENT_STATUSES: PaymentStatus[] = [
   'CANCELLED',
 ];
 
+/**
+ * Mirrors payment-service's own terminal-state check (`isTerminalPaymentStatus`,
+ * derived there from `PAYMENT_TRANSITIONS`) — these are the statuses whose
+ * transaction does NOT block a new `POST /payments` for the same order. Used
+ * to decide, before ever calling the backend, whether an order already has an
+ * in-flight or captured payment that must be resumed instead of re-paid.
+ */
+export const NON_BLOCKING_PAYMENT_STATUSES: PaymentStatus[] = [
+  'AUTHORIZATION_FAILED',
+  'CAPTURE_FAILED',
+  'VOIDED',
+  'REFUNDED',
+  'CHARGEBACK',
+  'CANCELLED',
+];
+
 export interface Transaction {
   id: string;
   orderId: string;

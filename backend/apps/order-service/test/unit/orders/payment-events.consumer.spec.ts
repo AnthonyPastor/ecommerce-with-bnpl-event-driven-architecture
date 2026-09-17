@@ -3,17 +3,27 @@ import { PaymentEventsConsumer } from '../../../src/orders/payment-events.consum
 
 function makeConsumer() {
   const kafkaConsumer = { subscribe: jest.fn(async () => undefined) };
-  const ordersService = { markRefunded: jest.fn(async () => undefined), markConfirmed: jest.fn(async () => undefined) };
+  const ordersService = {
+    markRefunded: jest.fn(async () => undefined),
+    markConfirmed: jest.fn(async () => undefined),
+    markPaymentIncident: jest.fn(async () => undefined),
+  };
   const consumer = new PaymentEventsConsumer(kafkaConsumer as any, ordersService as any);
   return { consumer, kafkaConsumer, ordersService };
 }
 
 describe('PaymentEventsConsumer', () => {
-  it('subscribes to payment.transaction.refunded.v1 and payment.transaction.captured.v1 on init', async () => {
+  it('subscribes to all payment health topics on init', async () => {
     const { consumer, kafkaConsumer } = makeConsumer();
     await consumer.onModuleInit();
     expect(kafkaConsumer.subscribe).toHaveBeenCalledWith(
-      [KafkaTopics.payment.refunded, KafkaTopics.payment.captured],
+      [
+        KafkaTopics.payment.refunded,
+        KafkaTopics.payment.captured,
+        KafkaTopics.payment.partiallyRefunded,
+        KafkaTopics.payment.disputeOpened,
+        KafkaTopics.payment.chargebackReceived,
+      ],
       expect.any(Function),
       'order-service',
     );
@@ -39,7 +49,7 @@ describe('PaymentEventsConsumer', () => {
     expect(ordersService.markRefunded).not.toHaveBeenCalled();
   });
 
-  it('passes null to markConfirmed when the captured payload has no paymentMethod', async () => {
+  it('defaults to INSTALLMENTS and warns when the captured payload has no paymentMethod', async () => {
     const { consumer, kafkaConsumer, ordersService } = makeConsumer();
     await consumer.onModuleInit();
     const handler = (kafkaConsumer.subscribe as jest.Mock).mock.calls[0][1];
@@ -55,7 +65,7 @@ describe('PaymentEventsConsumer', () => {
 
     await handler(envelope);
 
-    expect(ordersService.markConfirmed).toHaveBeenCalledWith('order-1', null);
+    expect(ordersService.markConfirmed).toHaveBeenCalledWith('order-1', 'INSTALLMENTS');
   });
 
   it('calls ordersService.markRefunded with the orderId from the event payload', async () => {
@@ -75,6 +85,29 @@ describe('PaymentEventsConsumer', () => {
     await handler(envelope);
 
     expect(ordersService.markRefunded).toHaveBeenCalledWith('order-1');
+  });
+
+  it.each([
+    [KafkaTopics.payment.partiallyRefunded, 'PARTIALLY_REFUNDED'],
+    [KafkaTopics.payment.disputeOpened, 'DISPUTED'],
+    [KafkaTopics.payment.chargebackReceived, 'CHARGEBACK'],
+  ] as const)('calls ordersService.markPaymentIncident(%s -> %s)', async (eventType, incident) => {
+    const { consumer, kafkaConsumer, ordersService } = makeConsumer();
+    await consumer.onModuleInit();
+    const handler = (kafkaConsumer.subscribe as jest.Mock).mock.calls[0][1];
+
+    const envelope = buildEventEnvelope({
+      eventType,
+      aggregateType: 'Transaction',
+      aggregateId: 'txn-1',
+      producer: 'payment-service',
+      correlationId: 'corr-1',
+      payload: { orderId: 'order-1', userId: 'user-1' },
+    });
+
+    await handler(envelope);
+
+    expect(ordersService.markPaymentIncident).toHaveBeenCalledWith('order-1', incident);
   });
 
   it('swallows errors from markRefunded so a missing order does not crash the consumer', async () => {

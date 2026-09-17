@@ -8,11 +8,10 @@ jest.mock('http-proxy-middleware', () => ({
     middlewareInstances.push(mw);
     return mw;
   }),
-  fixRequestBody: jest.fn(),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 describe('ProxyService', () => {
   beforeEach(() => {
@@ -67,12 +66,10 @@ describe('ProxyService', () => {
     );
   });
 
-  it('wires fixRequestBody as onProxyReq so POST/PUT/PATCH bodies survive Nest\'s body-parser', () => {
+  it('does not set onProxyReq — Nest\'s global body parser is disabled (see main.ts) so http-proxy-middleware streams the raw request body itself', () => {
     const service = new ProxyService();
     service.forward({} as any, {} as any, { target: 'http://localhost:3001', stripPrefix: '^/api' });
 
-    expect(createProxyMiddleware).toHaveBeenCalledWith(
-      expect.objectContaining({ onProxyReq: fixRequestBody }),
-    );
+    expect(createProxyMiddleware).toHaveBeenCalledWith(expect.not.objectContaining({ onProxyReq: expect.anything() }));
   });
 });

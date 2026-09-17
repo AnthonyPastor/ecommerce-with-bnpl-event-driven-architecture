@@ -72,8 +72,8 @@ export interface Order {
   id: string;
   userId: string;
   status: 'CREATED' | 'CONFIRMED' | 'CANCELLED' | 'REFUNDED';
-  /** Computed server-side by order-service from status + paymentMethod. */
-  paymentStatus: 'UNPAID' | 'PAID' | 'INSTALLMENTS_PENDING';
+  /** Computed server-side by order-service from status + paymentMethod + paymentIncident. */
+  paymentStatus: 'UNPAID' | 'PAID' | 'INSTALLMENTS_PENDING' | 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK';
   totalCents: number;
   currency: string;
   items: OrderItem[];

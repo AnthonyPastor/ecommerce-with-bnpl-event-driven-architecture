@@ -26,6 +26,16 @@ export class Order {
   @Column({ name: 'payment_method', type: 'varchar', nullable: true })
   paymentMethod!: PaymentMethod | null;
 
+  /**
+   * Mirrors the latest non-terminal-for-us payment health signal from
+   * payment-service (dispute opened, chargeback, partial refund) — payment
+   * state can keep moving after CONFIRMED, and `status` alone can't reflect
+   * that. Cleared back to null by a full refund. Drives `paymentStatus` in
+   * OrdersService alongside `status`/`paymentMethod`.
+   */
+  @Column({ name: 'payment_incident', type: 'varchar', nullable: true })
+  paymentIncident!: 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK' | null;
+
   @Column({ name: 'total_cents', type: 'int' })
   totalCents!: number;
 

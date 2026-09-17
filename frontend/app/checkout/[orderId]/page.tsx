@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { bnplApi } from '../../../lib/bnpl-api';
 import { ecommerceApi } from '../../../lib/ecommerce-api';
 import { formatPrice } from '../../../lib/format';
-import type { PaymentMethod } from '../../../lib/bnpl-types';
+import { NON_BLOCKING_PAYMENT_STATUSES, type PaymentMethod } from '../../../lib/bnpl-types';
 import { useRequireAuth } from '../../../lib/use-require-auth';
 
 const STEPS = ['Shipping', 'Plan', 'Review'];
@@ -36,16 +36,37 @@ export default function CheckoutPage() {
     queryFn: () => ecommerceApi.getOrder(orderId),
   });
 
+  // An order can already have a payment that's in flight (PENDING/AUTHORIZED)
+  // or blocking (e.g. PARTIALLY_REFUNDED/DISPUTED) without being CONFIRMED yet
+  // — payment-service's own createPayment guard rejects a second attempt for
+  // any of those. Check for one before ever showing the wizard, otherwise a
+  // user who navigates away mid-payment and comes back gets stuck retrying
+  // into a 409 with no way out (see the CONFIRMED bounce below for the
+  // captured/settled case).
+  const paymentByOrderQuery = useQuery({
+    queryKey: ['payment-by-order', orderId],
+    queryFn: () => bnplApi.getPaymentByOrderId(orderId),
+    enabled: orderQuery.data?.status !== undefined && orderQuery.data.status !== 'CONFIRMED',
+  });
+  const blockingTransaction =
+    paymentByOrderQuery.data && !NON_BLOCKING_PAYMENT_STATUSES.includes(paymentByOrderQuery.data.status)
+      ? paymentByOrderQuery.data
+      : null;
+
   // An order that already went through a successful payment must not be
   // payable again — bounce back to its confirmation/receipt page instead of
   // rendering the payment-method wizard. (Defense in depth: the entry point
   // from /orders already hides the "Go to checkout" link for a CONFIRMED
   // order, but this route is still reachable directly, e.g. via back-button.)
+  // Same for an order with a blocking transaction still in flight: resume
+  // polling it on the order page instead of letting the wizard render.
   useEffect(() => {
     if (orderQuery.data?.status === 'CONFIRMED') {
       router.replace(`/orders/${orderId}`);
+    } else if (blockingTransaction) {
+      router.replace(`/orders/${orderId}?tx=${blockingTransaction.id}`);
     }
-  }, [orderQuery.data?.status, orderId, router]);
+  }, [orderQuery.data?.status, blockingTransaction, orderId, router]);
 
   const pay = useMutation({
     mutationFn: () => {
@@ -67,6 +88,10 @@ export default function CheckoutPage() {
     return <div className="mx-auto max-w-[1040px] px-5 py-10 text-sm text-red-600">Order not found.</div>;
   }
   if (orderQuery.data.status === 'CONFIRMED') return null;
+  if (paymentByOrderQuery.isLoading) {
+    return <div className="mx-auto max-w-[1040px] px-5 py-10 text-sm text-muted">Loading order…</div>;
+  }
+  if (blockingTransaction) return null;
 
   const order = orderQuery.data;
   const shippingCents = shipping === 'express' ? 1200 : 0;

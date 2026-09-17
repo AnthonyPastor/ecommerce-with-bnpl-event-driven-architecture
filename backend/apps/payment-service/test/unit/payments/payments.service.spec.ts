@@ -3,10 +3,11 @@ import { Transaction } from '../../../src/payments/entities/transaction.entity';
 import { PaymentsService } from '../../../src/payments/payments.service';
 import { PaymentStatus } from '../../../src/payments/payment-state-machine';
 
-function makeFakeQueryRunner(initialTransaction: Partial<Transaction>) {
+function makeFakeQueryRunner(initialTransaction: Partial<Transaction>, existingForOrder: Partial<Transaction>[]) {
   let current: Transaction = { ...initialTransaction } as Transaction;
   const manager = {
     findOneOrFail: jest.fn(async () => current),
+    find: jest.fn(async () => existingForOrder),
     save: jest.fn(async (entity: any) => {
       if (entity.status) current = { ...current, ...entity };
       return entity;
@@ -15,6 +16,7 @@ function makeFakeQueryRunner(initialTransaction: Partial<Transaction>) {
   };
   const queryRunner = {
     manager,
+    query: jest.fn(async () => undefined),
     connect: jest.fn(async () => undefined),
     startTransaction: jest.fn(async () => undefined),
     commitTransaction: jest.fn(async () => undefined),
@@ -25,7 +27,7 @@ function makeFakeQueryRunner(initialTransaction: Partial<Transaction>) {
 }
 
 function makeService(txnState: Partial<Transaction>, existingForOrder: Partial<Transaction>[] = []) {
-  const { queryRunner, getCurrent } = makeFakeQueryRunner(txnState);
+  const { queryRunner, getCurrent } = makeFakeQueryRunner(txnState, existingForOrder);
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const transactionsRepo = {
     create: jest.fn((data: any) => data),
@@ -71,7 +73,7 @@ describe('PaymentsService.createPayment', () => {
       amountCents: 1000,
     });
 
-    expect(transactionsRepo.save).toHaveBeenCalledWith(
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: PaymentStatus.PENDING }),
     );
     expect(gateway.authorize).toHaveBeenCalledWith(
@@ -117,7 +119,7 @@ describe('PaymentsService.createPayment', () => {
   });
 
   it('allows a retry when every prior transaction for the order failed', async () => {
-    const { service, transactionsRepo } = makeService(
+    const { service, queryRunner } = makeService(
       { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
       [
         { id: 'txn-0', status: PaymentStatus.AUTHORIZATION_FAILED, orderId: 'order-1' },
@@ -128,18 +130,29 @@ describe('PaymentsService.createPayment', () => {
     const result = await service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
 
     expect(result.status).toBe(PaymentStatus.AUTHORIZED);
-    expect(transactionsRepo.save).toHaveBeenCalled();
+    expect(queryRunner.manager.save).toHaveBeenCalled();
+  });
+
+  it('allows a retry when the order was fully refunded', async () => {
+    const { service } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [{ id: 'txn-0', status: PaymentStatus.REFUNDED, orderId: 'order-1' }],
+    );
+
+    const result = await service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
+
+    expect(result.status).toBe(PaymentStatus.AUTHORIZED);
   });
 });
 
 describe('PaymentsService.findByOrderId', () => {
-  it('returns the order\'s transactions, most recent first, via the repository', async () => {
+  it("returns the requesting user's transactions for the order, most recent first, via the repository", async () => {
     const { service, transactionsRepo } = makeService({}, [{ id: 'txn-2' }, { id: 'txn-1' }] as Transaction[]);
 
-    const result = await service.findByOrderId('order-1');
+    const result = await service.findByOrderId('order-1', 'user-1');
 
     expect(transactionsRepo.find).toHaveBeenCalledWith({
-      where: { orderId: 'order-1' },
+      where: { orderId: 'order-1', userId: 'user-1' },
       order: { createdAt: 'DESC' },
     });
     expect(result).toEqual([{ id: 'txn-2' }, { id: 'txn-1' }]);

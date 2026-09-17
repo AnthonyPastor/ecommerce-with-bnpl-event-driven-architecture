@@ -11,6 +11,9 @@ const PAYMENT_STATUS_BADGE: Record<Order['paymentStatus'], { label: string; colo
   UNPAID: { label: 'Created', color: '#71717a', borderColor: '#e4e4e7' },
   PAID: { label: 'Paid', color: '#0f7b4f', borderColor: '#bbe3ce' },
   INSTALLMENTS_PENDING: { label: 'Installments pending', color: '#b3084a', borderColor: '#f6c2d6' },
+  PARTIALLY_REFUNDED: { label: 'Partially refunded', color: '#b3084a', borderColor: '#f6c2d6' },
+  DISPUTED: { label: 'Disputed', color: '#b45309', borderColor: '#fde3b8' },
+  CHARGEBACK: { label: 'Chargeback', color: '#b91c1c', borderColor: '#fbd0d0' },
 };
 
 export default function OrdersListPage() {

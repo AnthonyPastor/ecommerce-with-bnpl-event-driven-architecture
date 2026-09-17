@@ -87,4 +87,21 @@ describe('FakePaymentGateway', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
+
+  it('void() cancels the capture webhook self-scheduled by authorize() for the same gatewayReference', async () => {
+    jest.useFakeTimers();
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const gateway = makeGateway(2000);
+    const { gatewayReference } = await gateway.authorize({ transactionId: 'txn-1', amountCents: 100, currency: 'USD' });
+    await gateway.void({ transactionId: 'txn-1', gatewayReference });
+
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    gateway.onModuleDestroy();
+    jest.useRealTimers();
+  });
 });

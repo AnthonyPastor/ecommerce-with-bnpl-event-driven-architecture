@@ -29,7 +29,14 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   private readonly secret: string;
   private readonly selfBaseUrl: string;
   private readonly captureDelayMs: number;
-  private readonly timers = new Set<NodeJS.Timeout>();
+  /**
+   * Pending simulated-webhook timers, keyed by `gatewayReference` (stable per
+   * transaction). Lets `void()` cancel a still-pending `capture_succeeded`
+   * webhook scheduled by `authorize()` — otherwise it fires after the void and
+   * `WebhookProcessorConsumer` tries `VOIDED -> CAPTURED`, an invalid
+   * transition that exhausts RabbitMQ retries into the DLQ every time.
+   */
+  private readonly timersByReference = new Map<string, Set<NodeJS.Timeout>>();
 
   constructor(private readonly config: ConfigService) {
     super();
@@ -64,6 +71,7 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   }
 
   async void(input: VoidInput): Promise<VoidResult> {
+    this.cancelPendingWebhooks(input.gatewayReference);
     return { gatewayReference: input.gatewayReference };
   }
 
@@ -78,12 +86,35 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
 
   private scheduleWebhook(event: NormalizedWebhookEvent): void {
     const timer = setTimeout(() => {
-      this.timers.delete(timer);
+      this.removeTimer(event.gatewayReference, timer);
       this.sendWebhook(event).catch((err: Error) =>
         this.logger.error(`Failed to deliver simulated webhook: ${err.message}`),
       );
     }, this.captureDelayMs);
-    this.timers.add(timer);
+    this.addTimer(event.gatewayReference, timer);
+  }
+
+  private addTimer(gatewayReference: string, timer: NodeJS.Timeout): void {
+    let timers = this.timersByReference.get(gatewayReference);
+    if (!timers) {
+      timers = new Set();
+      this.timersByReference.set(gatewayReference, timers);
+    }
+    timers.add(timer);
+  }
+
+  private removeTimer(gatewayReference: string, timer: NodeJS.Timeout): void {
+    const timers = this.timersByReference.get(gatewayReference);
+    if (!timers) return;
+    timers.delete(timer);
+    if (timers.size === 0) this.timersByReference.delete(gatewayReference);
+  }
+
+  private cancelPendingWebhooks(gatewayReference: string): void {
+    const timers = this.timersByReference.get(gatewayReference);
+    if (!timers) return;
+    for (const timer of timers) clearTimeout(timer);
+    this.timersByReference.delete(gatewayReference);
   }
 
   private async sendWebhook(event: NormalizedWebhookEvent): Promise<void> {
@@ -97,7 +128,9 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   }
 
   onModuleDestroy(): void {
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
+    for (const timers of this.timersByReference.values()) {
+      for (const timer of timers) clearTimeout(timer);
+    }
+    this.timersByReference.clear();
   }
 }
