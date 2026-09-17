@@ -2,93 +2,183 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { apiClient } from '../../lib/api-client';
+import { ecommerceApi } from '../../lib/ecommerce-api';
 import { formatPrice } from '../../lib/format';
-import { useAuthStore } from '../../store/auth-store';
+import { useRequireAuth } from '../../lib/use-require-auth';
+
+type MutateArgs = { itemId: string; action: 'inc' | 'dec' | 'remove'; quantity: number };
 
 export default function CartPage() {
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
+  const { user, ready } = useRequireAuth();
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (!user) router.replace('/login');
-  }, [user, router]);
 
   const cartQuery = useQuery({
     queryKey: ['cart', user?.id],
-    queryFn: () => apiClient.getCart(user!.id),
+    queryFn: () => ecommerceApi.getCart(user!.id),
     enabled: !!user,
   });
 
-  const removeItem = useMutation({
-    mutationFn: (itemId: string) => apiClient.removeCartItem(user!.id, itemId),
+  const mutateItem = useMutation({
+    mutationFn: ({ itemId, action, quantity }: MutateArgs) => {
+      if (action === 'remove' || quantity <= 0) return ecommerceApi.removeCartItem(user!.id, itemId);
+      return ecommerceApi.updateCartItem(user!.id, itemId, quantity);
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cart'] }),
   });
 
   const checkout = useMutation({
-    mutationFn: () => apiClient.checkout(user!.id),
+    mutationFn: () => ecommerceApi.checkout(user!.id),
     onSuccess: (order) => {
       queryClient.invalidateQueries({ queryKey: ['cart'] });
-      router.push(`/orders/${order.id}`);
+      router.push(`/checkout/${order.id}`);
     },
   });
 
-  if (!user) return null;
+  if (!ready) return null;
+
+  const items = cartQuery.data?.items ?? [];
+  const isBusy = (itemId: string) => mutateItem.isPending && mutateItem.variables?.itemId === itemId;
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="mb-6 text-xl font-semibold text-gray-900">Your cart</h1>
+    <div className="mx-auto max-w-[1100px] px-5 pb-20 pt-10">
+      <h1 className="m-0 mb-7 text-[38px] font-bold uppercase leading-none tracking-tight">Your cart</h1>
 
-      {cartQuery.isLoading && <p className="text-sm text-gray-500">Loading...</p>}
-      {cartQuery.isError && <p className="text-sm text-red-600">We couldn&apos;t load your cart.</p>}
-
-      {cartQuery.data && cartQuery.data.items.length === 0 && (
-        <p className="text-sm text-gray-500">Your cart is empty.</p>
-      )}
-
-      {cartQuery.data && cartQuery.data.items.length > 0 && (
-        <div className="flex flex-col gap-4">
-          <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-            {cartQuery.data.items.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-4 p-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{item.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {item.quantity} x {formatPrice(item.unitPriceCents, 'USD')}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeItem.mutate(item.id)}
-                  disabled={removeItem.isPending}
-                  className="text-xs text-red-600 hover:underline disabled:opacity-50"
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4">
-            <span className="text-sm font-medium text-gray-900">Total</span>
-            <span className="text-lg font-semibold text-gray-900">
-              {formatPrice(cartQuery.data.totalCents, 'USD')}
-            </span>
-          </div>
-
-          <button
-            onClick={() => checkout.mutate()}
-            disabled={checkout.isPending}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
-          >
-            {checkout.isPending ? 'Processing...' : 'Confirm purchase'}
-          </button>
-          {checkout.isError && (
-            <p className="text-sm text-red-600">We couldn&apos;t confirm the purchase. Please try again.</p>
-          )}
+      {cartQuery.isLoading && (
+        <div className="flex flex-col gap-3.5">
+          {[1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-[116px] animate-vshimmer bg-[#f4f4f5]"
+              style={{ backgroundImage: 'linear-gradient(90deg, #f4f4f5 0px, #ebebed 160px, #f4f4f5 320px)', backgroundSize: '320px 100%' }}
+            />
+          ))}
         </div>
       )}
-    </main>
+
+      {cartQuery.isError && <p className="text-sm text-red-600">We couldn&apos;t load your cart.</p>}
+
+      {cartQuery.data && items.length === 0 && (
+        <div className="flex flex-col items-center gap-3.5 border border-dashed border-[#d4d4d8] p-16 text-center">
+          <span className="font-mono text-[11px] uppercase tracking-wide text-muted">Empty cart</span>
+          <p className="m-0 text-2xl font-bold tracking-tight">Nothing here yet</p>
+          <p className="m-0 max-w-[380px] text-sm leading-relaxed text-[#71717a]">
+            Add a pair from the catalog and it will show up in this summary.
+          </p>
+          <button onClick={() => router.push('/')} className="bg-ink px-5 py-3 text-xs font-semibold uppercase tracking-wide text-white">
+            Browse catalog
+          </button>
+        </div>
+      )}
+
+      {cartQuery.data && items.length > 0 && (
+        <div className="flex flex-wrap items-start gap-10">
+          <div className="flex min-w-[300px] flex-1 basis-[480px] flex-col">
+            {items.map((item) => {
+              const busy = isBusy(item.id);
+              return (
+                <div key={item.id} className="flex gap-[18px] border-t border-hair py-5" style={{ opacity: busy ? 0.55 : 1 }}>
+                  <div
+                    className="h-[120px] w-24 shrink-0 border border-[#f0f0f2]"
+                    style={{ backgroundColor: '#ffffff', backgroundImage: 'repeating-linear-gradient(135deg, #fafafa 0 8px, #f2f2f4 8px 16px)' }}
+                  />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <button
+                      onClick={() => router.push(`/products/${item.productId}`)}
+                      className="text-left text-[17px] font-semibold tracking-tight"
+                    >
+                      {item.name}
+                    </button>
+                    <span className="font-mono text-xs text-[#71717a]">
+                      {item.variantId ? 'Size selected' : 'Size —'}
+                    </span>
+                    <div className="mt-2.5 flex items-center gap-3.5">
+                      <div className="flex items-center border border-hair">
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            mutateItem.mutate({ itemId: item.id, action: 'dec', quantity: item.quantity - 1 })
+                          }
+                          className="h-[34px] w-[34px] text-base font-semibold hover:bg-[#f4f4f5]"
+                        >
+                          –
+                        </button>
+                        <span className="min-w-[34px] text-center font-mono text-[13px] font-semibold">
+                          {item.quantity}
+                        </span>
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            mutateItem.mutate({ itemId: item.id, action: 'inc', quantity: item.quantity + 1 })
+                          }
+                          className="h-[34px] w-[34px] text-base font-semibold hover:bg-[#f4f4f5]"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <button
+                        disabled={busy}
+                        onClick={() => mutateItem.mutate({ itemId: item.id, action: 'remove', quantity: 0 })}
+                        className="text-xs text-muted underline hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                      {busy && (
+                        <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-muted">
+                          <span className="block h-[11px] w-[11px] animate-vspin rounded-full border-2 border-hair border-t-accent" />
+                          Updating
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 text-right">
+                    <span className="text-[17px] font-bold">
+                      {formatPrice(item.unitPriceCents * item.quantity, 'USD')}
+                    </span>
+                    <span className="font-mono text-[11px] text-muted">{formatPrice(item.unitPriceCents, 'USD')} ea.</span>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="mt-1 border-t border-hair pt-5">
+              <button onClick={() => router.push('/')} className="font-mono text-[11px] uppercase tracking-wide text-[#71717a]">
+                Keep shopping
+              </button>
+            </div>
+          </div>
+
+          <aside className="sticky top-[92px] flex w-full max-w-[330px] flex-col gap-[18px] border border-hair p-[26px]">
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em]">Summary</span>
+            <div className="flex flex-col gap-2.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-[#52525b]">Subtotal</span>
+                <span className="font-semibold">{formatPrice(cartQuery.data.totalCents, 'USD')}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-[#52525b]">Shipping</span>
+                <span className="font-semibold">Free</span>
+              </div>
+            </div>
+            <div className="flex items-baseline justify-between border-t border-hair pt-4">
+              <span className="text-[13px] font-semibold uppercase tracking-wide">Total</span>
+              <span className="text-[26px] font-bold tracking-tight">{formatPrice(cartQuery.data.totalCents, 'USD')}</span>
+            </div>
+            <button
+              onClick={() => checkout.mutate()}
+              disabled={checkout.isPending}
+              className="bg-ink py-4 text-[13px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-70"
+            >
+              {checkout.isPending ? 'Processing…' : 'Go to checkout'}
+            </button>
+            <span className="text-[11px] leading-relaxed text-muted">
+              Continuing creates the order; payment is confirmed in the next step.
+            </span>
+            {checkout.isError && (
+              <p className="text-xs text-red-600">We couldn&apos;t confirm the purchase. Please try again.</p>
+            )}
+          </aside>
+        </div>
+      )}
+    </div>
   );
 }

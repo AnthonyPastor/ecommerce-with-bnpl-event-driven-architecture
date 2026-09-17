@@ -1,3 +1,15 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  a {
+    color: #0b0b0c;
+  }
+  a:hover {
+    color: #ff2d6f;
+  }
+  button {
+    cursor: pointer;
+  }
+}

@@ -5,8 +5,14 @@ import { Product } from './catalog/entities/product.entity';
 import { ProductVariant } from './catalog/entities/product-variant.entity';
 
 /**
- * Manual seed of sample data. Run with `pnpm --filter catalog-service run seed`
- * against the DB already started by docker-compose.
+ * Manual seed of the Veloce shoe-store catalog. Run with
+ * `pnpm --filter catalog-service run seed` against the DB already started by
+ * docker-compose. Idempotent (matches by slug/name) — safe to re-run.
+ *
+ * To re-seed cleanly against a DB that already has the old generic sample
+ * data (headphones, t-shirts, etc.), truncate `products`, `categories`, and
+ * `product_variants` first — this is dev-only since `synchronize: true` is
+ * already the deliberate DB strategy here, not a migration concern.
  */
 async function seed() {
   const dataSource = new DataSource({
@@ -27,104 +33,112 @@ async function seed() {
   const variantRepo = dataSource.getRepository(ProductVariant);
 
   const categoriesData = [
-    { name: 'Electronics', slug: 'electronics' },
-    { name: 'Apparel', slug: 'apparel' },
-    { name: 'Home', slug: 'home' },
+    { name: 'Running', slug: 'running' },
+    { name: 'Lifestyle', slug: 'lifestyle' },
+    { name: 'Trail', slug: 'trail' },
+    { name: 'Court', slug: 'court' },
   ];
 
-  const categories: Category[] = [];
+  const categoriesBySlug = new Map<string, Category>();
   for (const data of categoriesData) {
     let category = await categoryRepo.findOne({ where: { slug: data.slug } });
     if (!category) {
       category = await categoryRepo.save(categoryRepo.create(data));
     }
-    categories.push(category);
+    categoriesBySlug.set(data.slug, category);
   }
 
-  const [electronics, apparel, home] = categories;
+  const SIZES = ['US 7', 'US 8', 'US 9', 'US 10', 'US 11', 'US 12'];
 
   const productsData: Array<{
     name: string;
     description: string;
     priceCents: number;
-    category: Category;
-    imageUrl?: string;
-    variants?: Array<{ name: string; priceCents: number; stock: number }>;
+    categorySlug: string;
+    stockOut: string[];
+    isPro?: boolean;
   }> = [
     {
-      name: 'Bluetooth Headphones',
-      description: 'Wireless headphones with noise cancellation.',
-      priceCents: 8999,
-      category: electronics,
-      variants: [
-        { name: 'Black', priceCents: 8999, stock: 25 },
-        { name: 'White', priceCents: 8999, stock: 15 },
-      ],
+      name: 'Kinetic 1',
+      description: 'Propulsion plate and high-rebound foam for fast training days.',
+      priceCents: 13900,
+      categorySlug: 'running',
+      stockOut: ['US 7'],
     },
     {
-      name: 'Smartwatch Series 5',
-      description: 'Smartwatch with heart-rate monitor.',
-      priceCents: 19999,
-      category: electronics,
-      variants: [
-        { name: '40mm', priceCents: 19999, stock: 10 },
-        { name: '44mm', priceCents: 21999, stock: 8 },
-      ],
+      name: 'Kinetic Pro Carbon',
+      description: 'Full carbon plate. Built for race day and track intervals.',
+      priceCents: 22900,
+      categorySlug: 'running',
+      stockOut: ['US 12'],
+      isPro: true,
     },
     {
-      name: 'Portable Speaker',
-      description: 'Water-resistant Bluetooth speaker.',
-      priceCents: 5499,
-      category: electronics,
+      name: 'Kinetic Rebound',
+      description: 'Stable cushioning for daily mileage.',
+      priceCents: 16900,
+      categorySlug: 'running',
+      stockOut: [],
     },
     {
-      name: 'Basic T-Shirt',
-      description: '100% cotton t-shirt.',
-      priceCents: 2499,
-      category: apparel,
-      variants: [
-        { name: 'S', priceCents: 2499, stock: 30 },
-        { name: 'M', priceCents: 2499, stock: 40 },
-        { name: 'L', priceCents: 2499, stock: 20 },
-      ],
+      name: 'Trace Court Low',
+      description: 'Classic court silhouette in smooth leather.',
+      priceCents: 9900,
+      categorySlug: 'lifestyle',
+      stockOut: ['US 8', 'US 11'],
     },
     {
-      name: 'Winter Jacket',
-      description: 'Waterproof winter jacket.',
-      priceCents: 12999,
-      category: apparel,
-      variants: [
-        { name: 'M', priceCents: 12999, stock: 12 },
-        { name: 'L', priceCents: 12999, stock: 9 },
-      ],
+      name: 'Trace Court High',
+      description: 'High top with vulcanized rubber sole.',
+      priceCents: 11900,
+      categorySlug: 'lifestyle',
+      stockOut: [],
     },
     {
-      name: 'Urban Sneakers',
-      description: 'Casual sneakers for everyday wear.',
-      priceCents: 15999,
-      category: apparel,
+      name: 'Pulse Street 90',
+      description: 'Mesh and synthetic upper with visible air unit.',
+      priceCents: 10900,
+      categorySlug: 'lifestyle',
+      stockOut: ['US 7'],
     },
     {
-      name: 'Sheet Set',
-      description: '100% cotton sheet set, full size.',
-      priceCents: 7499,
-      category: home,
+      name: 'Studio Knit Slip',
+      description: 'Laceless knit build for all-day wear.',
+      priceCents: 7900,
+      categorySlug: 'lifestyle',
+      stockOut: [],
     },
     {
-      name: 'Electric Coffee Maker',
-      description: '12-cup drip coffee maker.',
-      priceCents: 10999,
-      category: home,
-      variants: [
-        { name: 'Black', priceCents: 10999, stock: 18 },
-        { name: 'Silver', priceCents: 11999, stock: 6 },
-      ],
+      name: 'Drift Trail GTX',
+      description: 'Waterproof membrane with 4 mm lugs.',
+      priceCents: 17900,
+      categorySlug: 'trail',
+      stockOut: ['US 9'],
+    },
+    {
+      name: 'Ridge Trail 2',
+      description: 'Lightweight chassis for technical trails.',
+      priceCents: 15900,
+      categorySlug: 'trail',
+      stockOut: [],
+    },
+    {
+      name: 'Arena Court Pro',
+      description: 'Reinforced lateral support for indoor court.',
+      priceCents: 12900,
+      categorySlug: 'court',
+      stockOut: ['US 10'],
     },
   ];
 
   for (const data of productsData) {
+    const isPro = data.isPro ?? false;
     const existing = await productRepo.findOne({ where: { name: data.name } });
     if (existing) {
+      if (existing.isPro !== isPro) {
+        existing.isPro = isPro;
+        await productRepo.save(existing);
+      }
       continue;
     }
 
@@ -133,15 +147,21 @@ async function seed() {
         name: data.name,
         description: data.description,
         priceCents: data.priceCents,
-        category: data.category,
-        imageUrl: data.imageUrl ?? null,
+        category: categoriesBySlug.get(data.categorySlug) ?? null,
+        imageUrl: null,
+        isPro,
       }),
     );
 
-    if (data.variants) {
-      for (const variant of data.variants) {
-        await variantRepo.save(variantRepo.create({ ...variant, product }));
-      }
+    for (const size of SIZES) {
+      await variantRepo.save(
+        variantRepo.create({
+          product,
+          name: size,
+          priceCents: data.priceCents,
+          stock: data.stockOut.includes(size) ? 0 : 6,
+        }),
+      );
     }
   }
 

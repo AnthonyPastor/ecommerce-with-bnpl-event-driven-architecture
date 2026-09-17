@@ -104,12 +104,12 @@ describe('OrdersService.createOrder', () => {
 });
 
 describe('OrdersService.findById / findByUserId', () => {
-  it('returns the order when found', async () => {
+  it('returns the order with a computed paymentStatus when found', async () => {
     const { service, ordersRepo } = makeService();
-    const order = { id: 'order-1' } as Order;
+    const order = { id: 'order-1', status: 'CREATED', paymentMethod: null } as unknown as Order;
     ordersRepo.findOne.mockResolvedValue(order);
 
-    await expect(service.findById('order-1')).resolves.toBe(order);
+    await expect(service.findById('order-1')).resolves.toEqual({ ...order, paymentStatus: 'UNPAID' });
   });
 
   it('throws NotFoundException when the order does not exist', async () => {
@@ -119,15 +119,74 @@ describe('OrdersService.findById / findByUserId', () => {
     await expect(service.findById('missing')).rejects.toThrow(NotFoundException);
   });
 
-  it('lists orders by userId newest first', async () => {
+  it('lists orders by userId newest first, each with a computed paymentStatus', async () => {
     const { service, ordersRepo } = makeService();
-    ordersRepo.find.mockResolvedValue([]);
+    const order = { id: 'order-1', status: 'CREATED', paymentMethod: null } as unknown as Order;
+    ordersRepo.find.mockResolvedValue([order]);
 
-    await service.findByUserId('user-1');
+    const result = await service.findByUserId('user-1');
 
     expect(ordersRepo.find).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'user-1' } }),
     );
+    expect(result).toEqual([{ ...order, paymentStatus: 'UNPAID' }]);
+  });
+
+  it.each([
+    ['CREATED', null, 'UNPAID'],
+    ['CONFIRMED', 'FULL', 'PAID'],
+    ['CONFIRMED', 'INSTALLMENTS', 'INSTALLMENTS_PENDING'],
+  ] as const)('status %s + paymentMethod %s -> paymentStatus %s', async (status, paymentMethod, expected) => {
+    const { service, ordersRepo } = makeService();
+    const order = { id: 'order-1', status, paymentMethod } as unknown as Order;
+    ordersRepo.findOne.mockResolvedValue(order);
+
+    const result = await service.findById('order-1');
+
+    expect(result.paymentStatus).toBe(expected);
+  });
+});
+
+describe('OrdersService.markConfirmed', () => {
+  it('transitions the order to CONFIRMED, persists the paymentMethod, and writes the outbox event', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CREATED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.markConfirmed('order-1', 'FULL' as any);
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'CONFIRMED', paymentMethod: 'FULL' }),
+    );
+    expect(queryRunner.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('persists a null paymentMethod when the event payload did not carry one', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CREATED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.markConfirmed('order-1', null);
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'CONFIRMED', paymentMethod: null }),
+    );
+  });
+
+  it('is idempotent: does nothing if the order is already CONFIRMED', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CONFIRMED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.markConfirmed('order-1', 'FULL' as any);
+
+    expect(queryRunner.manager.save).not.toHaveBeenCalled();
+  });
+
+  it('does nothing if the order has moved past CREATED some other way (e.g. REFUNDED)', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'REFUNDED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.markConfirmed('order-1', 'FULL' as any);
+
+    expect(queryRunner.manager.save).not.toHaveBeenCalled();
   });
 });
 

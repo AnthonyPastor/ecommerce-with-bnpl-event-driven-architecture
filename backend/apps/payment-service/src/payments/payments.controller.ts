@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentsService } from './payments.service';
@@ -10,6 +10,12 @@ export class PaymentsController {
   @Post()
   create(@Body() dto: CreatePaymentDto) {
     return this.paymentsService.createPayment(dto);
+  }
+
+  /** `?orderId=` lets a client resolve "does this order already have a payment" without carrying a transactionId around. */
+  @Get()
+  findByOrderId(@Query('orderId') orderId: string) {
+    return this.paymentsService.findByOrderId(orderId);
   }
 
   @Get(':id')

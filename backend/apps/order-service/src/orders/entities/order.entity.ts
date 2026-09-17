@@ -1,4 +1,4 @@
-import { OrderStatus } from '@bnpl/event-contracts';
+import { OrderStatus, PaymentMethod } from '@bnpl/event-contracts';
 import {
   Column,
   CreateDateColumn,
@@ -21,6 +21,10 @@ export class Order {
 
   @Column({ type: 'varchar', default: OrderStatus.CREATED })
   status!: OrderStatus;
+
+  /** Set only once the order is CONFIRMED (from the `payment.transaction.captured.v1` payload) — drives the computed `paymentStatus` in OrdersService. */
+  @Column({ name: 'payment_method', type: 'varchar', nullable: true })
+  paymentMethod!: PaymentMethod | null;
 
   @Column({ name: 'total_cents', type: 'int' })
   totalCents!: number;

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { KafkaTopics } from '@bnpl/event-contracts';
+import { KafkaTopics, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -27,8 +27,21 @@ export class PaymentsService {
     private readonly requestContext: RequestContextService,
   ) {}
 
-  /** Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway. */
+  /**
+   * Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway.
+   * Guards against paying the same order twice: any existing transaction for
+   * `orderId` other than a failed authorize/capture blocks a new attempt —
+   * a failed one must remain retryable, a captured/in-flight one must not.
+   */
   async createPayment(dto: CreatePaymentDto): Promise<Transaction> {
+    const existingForOrder = await this.transactions.find({ where: { orderId: dto.orderId } });
+    const blocking = existingForOrder.find(
+      (t) => t.status !== PaymentStatus.AUTHORIZATION_FAILED && t.status !== PaymentStatus.CAPTURE_FAILED,
+    );
+    if (blocking) {
+      throw new ConflictException(`Order ${dto.orderId} already has a payment in status ${blocking.status}`);
+    }
+
     const id = randomUUID();
     const currency = dto.currency ?? 'USD';
 
@@ -39,6 +52,7 @@ export class PaymentsService {
       amountCents: dto.amountCents,
       currency,
       status: PaymentStatus.PENDING,
+      paymentMethod: dto.paymentMethod ?? PaymentMethod.INSTALLMENTS,
       gatewayProvider: 'fake',
       gatewayReference: null,
       refundedAmountCents: 0,
@@ -169,6 +183,7 @@ export class PaymentsService {
           userId: transaction.userId,
           amountCents: event.amountCents ?? transaction.amountCents,
           currency: transaction.currency,
+          paymentMethod: transaction.paymentMethod,
         });
         return;
 
@@ -221,6 +236,10 @@ export class PaymentsService {
 
   async findByGatewayReference(gatewayReference: string): Promise<Transaction | null> {
     return this.transactions.findOne({ where: { gatewayReference } });
+  }
+
+  async findByOrderId(orderId: string): Promise<Transaction[]> {
+    return this.transactions.find({ where: { orderId }, order: { createdAt: 'DESC' } });
   }
 
   /**

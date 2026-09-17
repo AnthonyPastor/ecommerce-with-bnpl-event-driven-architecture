@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Transaction } from '../../../src/payments/entities/transaction.entity';
 import { PaymentsService } from '../../../src/payments/payments.service';
 import { PaymentStatus } from '../../../src/payments/payment-state-machine';
@@ -24,7 +24,7 @@ function makeFakeQueryRunner(initialTransaction: Partial<Transaction>) {
   return { queryRunner, getCurrent: () => current };
 }
 
-function makeService(txnState: Partial<Transaction>) {
+function makeService(txnState: Partial<Transaction>, existingForOrder: Partial<Transaction>[] = []) {
   const { queryRunner, getCurrent } = makeFakeQueryRunner(txnState);
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const transactionsRepo = {
@@ -32,6 +32,7 @@ function makeService(txnState: Partial<Transaction>) {
     save: jest.fn(async (data: any) => data),
     findOne: jest.fn(async () => getCurrent()),
     findOneOrFail: jest.fn(async () => getCurrent()),
+    find: jest.fn(async () => existingForOrder),
   };
   const requestContext = {
     getCorrelationId: jest.fn(() => 'corr-1'),
@@ -91,6 +92,57 @@ describe('PaymentsService.createPayment', () => {
     await expect(
       service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 }),
     ).rejects.toThrow('card declined');
+  });
+
+  it('rejects a second payment for an order that already has a CAPTURED transaction', async () => {
+    const { service } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [{ id: 'txn-0', status: PaymentStatus.CAPTURED, orderId: 'order-1' }],
+    );
+
+    await expect(
+      service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('rejects a second payment for an order with an in-flight (AUTHORIZED) transaction', async () => {
+    const { service } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [{ id: 'txn-0', status: PaymentStatus.AUTHORIZED, orderId: 'order-1' }],
+    );
+
+    await expect(
+      service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows a retry when every prior transaction for the order failed', async () => {
+    const { service, transactionsRepo } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [
+        { id: 'txn-0', status: PaymentStatus.AUTHORIZATION_FAILED, orderId: 'order-1' },
+        { id: 'txn-0b', status: PaymentStatus.CAPTURE_FAILED, orderId: 'order-1' },
+      ],
+    );
+
+    const result = await service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
+
+    expect(result.status).toBe(PaymentStatus.AUTHORIZED);
+    expect(transactionsRepo.save).toHaveBeenCalled();
+  });
+});
+
+describe('PaymentsService.findByOrderId', () => {
+  it('returns the order\'s transactions, most recent first, via the repository', async () => {
+    const { service, transactionsRepo } = makeService({}, [{ id: 'txn-2' }, { id: 'txn-1' }] as Transaction[]);
+
+    const result = await service.findByOrderId('order-1');
+
+    expect(transactionsRepo.find).toHaveBeenCalledWith({
+      where: { orderId: 'order-1' },
+      order: { createdAt: 'DESC' },
+    });
+    expect(result).toEqual([{ id: 'txn-2' }, { id: 'txn-1' }]);
   });
 });
 

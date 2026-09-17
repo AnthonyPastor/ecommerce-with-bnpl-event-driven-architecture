@@ -50,8 +50,16 @@ export const api = {
   getOrder: (token: string, orderId: string) =>
     request<{ id: string; status: string }>(`/orders/${orderId}`, { token }),
 
-  pay: (token: string, input: { orderId: string; userId: string; amountCents: number; currency: string }) =>
-    request<{ id: string; status: string }>('/payments', { method: 'POST', body: input, token }),
+  pay: (
+    token: string,
+    input: {
+      orderId: string;
+      userId: string;
+      amountCents: number;
+      currency: string;
+      paymentMethod?: 'FULL' | 'INSTALLMENTS';
+    },
+  ) => request<{ id: string; status: string }>('/payments', { method: 'POST', body: input, token }),
 
   getPayment: (token: string, transactionId: string) =>
     request<{ id: string; status: string }>(`/payments/${transactionId}`, { token }),

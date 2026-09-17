@@ -31,6 +31,9 @@ export class Product {
   @Column({ name: 'image_url', type: 'varchar', nullable: true })
   imageUrl!: string | null;
 
+  @Column({ name: 'is_pro', type: 'boolean', default: false })
+  isPro!: boolean;
+
   @ManyToOne(() => Category, (category) => category.products, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'category_id' })
   category!: Category | null;

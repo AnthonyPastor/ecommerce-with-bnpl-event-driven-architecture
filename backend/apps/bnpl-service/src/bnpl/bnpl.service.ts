@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { InstallmentPlanStatus, InstallmentStatus, KafkaTopics } from '@bnpl/event-contracts';
+import { InstallmentPlanStatus, InstallmentStatus, KafkaTopics, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -18,6 +18,8 @@ export interface PaymentEventPayload {
   userId: string;
   amountCents: number;
   currency: string;
+  /** Only present on `payment.transaction.captured.v1` — absent on refund/chargeback events. */
+  paymentMethod?: PaymentMethod;
 }
 
 @Injectable()
@@ -40,6 +42,11 @@ export class BnplService {
    * authorized.
    */
   async activatePlanForCapturedPayment(payload: PaymentEventPayload): Promise<void> {
+    if (payload.paymentMethod === PaymentMethod.FULL) {
+      this.logger.log(`Order ${payload.orderId} was paid in full, skipping installment plan creation`);
+      return;
+    }
+
     const profile = await this.creditScoring.getOrCreateProfile(payload.userId);
     if (profile.blocked) {
       this.logger.warn(

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { KafkaTopics, OrderStatus } from '@bnpl/event-contracts';
+import { KafkaTopics, OrderStatus, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
 import { Injectable, NotFoundException } from '@nestjs/common';
@@ -9,6 +9,25 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Order } from './entities/order.entity';
+
+/**
+ * What the client actually cares about: did this order get paid, and how.
+ * Computed here (not stored) so it's always derived from `status` +
+ * `paymentMethod` rather than risking the two drifting apart.
+ * `INSTALLMENTS_PENDING` is honest about a known gap: no installment is ever
+ * actually marked PAID yet (no "charge the next installment" job exists), so
+ * an installments order never legitimately reaches a "paid off" state today.
+ */
+export type OrderPaymentStatus = 'UNPAID' | 'PAID' | 'INSTALLMENTS_PENDING';
+
+export type OrderWithPaymentStatus = Order & { paymentStatus: OrderPaymentStatus };
+
+function paymentStatusFor(order: Order): OrderPaymentStatus {
+  if (order.status !== OrderStatus.CONFIRMED) {
+    return 'UNPAID';
+  }
+  return order.paymentMethod === PaymentMethod.FULL ? 'PAID' : 'INSTALLMENTS_PENDING';
+}
 
 @Injectable()
 export class OrdersService {
@@ -92,16 +111,59 @@ export class OrdersService {
     }
   }
 
-  async findById(id: string): Promise<Order> {
+  async findById(id: string): Promise<OrderWithPaymentStatus> {
     const order = await this.orders.findOne({ where: { id }, relations: ['items'] });
     if (!order) {
       throw new NotFoundException(`Order ${id} not found`);
     }
-    return order;
+    return { ...order, paymentStatus: paymentStatusFor(order) };
   }
 
-  async findByUserId(userId: string): Promise<Order[]> {
-    return this.orders.find({ where: { userId }, relations: ['items'], order: { createdAt: 'DESC' } });
+  async findByUserId(userId: string): Promise<OrderWithPaymentStatus[]> {
+    const orders = await this.orders.find({ where: { userId }, relations: ['items'], order: { createdAt: 'DESC' } });
+    return orders.map((order) => ({ ...order, paymentStatus: paymentStatusFor(order) }));
+  }
+
+  /** Reaction to `payment.transaction.captured.v1`: marks the order as confirmed once its payment succeeds. */
+  async markConfirmed(orderId: string, paymentMethod: PaymentMethod | null): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const order = await queryRunner.manager.findOneOrFail(Order, { where: { id: orderId } });
+      if (order.status !== OrderStatus.CREATED) {
+        await queryRunner.rollbackTransaction();
+        return; // idempotent: already confirmed, or moved past CREATED some other way
+      }
+
+      const fromStatus = order.status;
+      order.status = OrderStatus.CONFIRMED;
+      order.paymentMethod = paymentMethod;
+
+      const saved = await saveWithOutbox(queryRunner, order, {
+        eventType: KafkaTopics.order.confirmed,
+        aggregateType: 'Order',
+        aggregateId: order.id,
+        correlationId: this.requestContext.getCorrelationId() ?? 'unknown',
+        transactionId: order.id,
+        payload: { orderId: order.id, userId: order.userId },
+      });
+
+      const history = queryRunner.manager.create(OrderStatusHistory, {
+        order: saved,
+        fromStatus,
+        toStatus: OrderStatus.CONFIRMED,
+      });
+      await queryRunner.manager.save(history);
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   /** Reaction to `payment.transaction.refunded.v1` (full refund): marks the order as refunded. */

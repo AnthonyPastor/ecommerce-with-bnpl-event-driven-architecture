@@ -18,6 +18,7 @@ export interface ProductDto {
   priceCents: number;
   currency: string;
   imageUrl: string | null;
+  isPro: boolean;
   category: CategoryDto | null;
   variants: VariantDto[];
 }

@@ -114,6 +114,29 @@ describe('CartService', () => {
     await expect(service.removeItem('user-1', 'nonexistent')).rejects.toThrow(NotFoundException);
   });
 
+  it('updateItemQuantity sets the quantity without removing the item', async () => {
+    const afterAdd = await service.addItem({
+      userId: 'user-1',
+      productId: 'prod-1',
+      name: 'Widget',
+      unitPriceCents: 1000,
+      quantity: 3,
+    });
+    const itemId = afterAdd.items[0].id;
+
+    const dto = await service.updateItemQuantity('user-1', itemId, 1);
+    expect(dto.items).toHaveLength(1);
+    expect(dto.items[0].quantity).toBe(1);
+    expect(dto.totalCents).toBe(1000);
+  });
+
+  it('updateItemQuantity throws NotFoundException for an unknown item', async () => {
+    await service.getOrCreateActiveCart('user-1');
+    await expect(service.updateItemQuantity('user-1', 'nonexistent', 2)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
   it('checkout throws BadRequestException on an empty cart', async () => {
     await service.getOrCreateActiveCart('user-1');
     await expect(service.checkout('user-1')).rejects.toThrow(BadRequestException);

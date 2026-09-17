@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsPositive, IsString, MinLength } from 'class-validator';
+import { PaymentMethod } from '@bnpl/event-contracts';
+import { IsEnum, IsInt, IsOptional, IsPositive, IsString, MinLength } from 'class-validator';
 
 export class CreatePaymentDto {
   @IsString()
@@ -16,4 +17,9 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   currency?: string;
+
+  /** Defaults to INSTALLMENTS when omitted, preserving pre-existing behavior. */
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 }

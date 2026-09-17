@@ -1,4 +1,4 @@
-import { InstallmentPlanStatus, InstallmentStatus } from '@bnpl/event-contracts';
+import { InstallmentPlanStatus, InstallmentStatus, PaymentMethod } from '@bnpl/event-contracts';
 import { BnplService, PaymentEventPayload } from '../../../src/bnpl/bnpl.service';
 import { InstallmentPlan } from '../../../src/bnpl/entities/installment-plan.entity';
 
@@ -91,6 +91,15 @@ describe('BnplService.activatePlanForCapturedPayment', () => {
     await service.activatePlanForCapturedPayment(capturedPayload);
 
     expect(queryRunner.startTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not create a plan when the order was paid in full', async () => {
+    const { service, queryRunner, creditScoring } = makeService();
+
+    await service.activatePlanForCapturedPayment({ ...capturedPayload, paymentMethod: PaymentMethod.FULL });
+
+    expect(queryRunner.startTransaction).not.toHaveBeenCalled();
+    expect(creditScoring.getOrCreateProfile).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,4 @@
-import { PaymentStatus } from '@bnpl/event-contracts';
+import { PaymentMethod, PaymentStatus } from '@bnpl/event-contracts';
 import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('transactions')
@@ -22,6 +22,9 @@ export class Transaction {
 
   @Column({ type: 'varchar' })
   status!: PaymentStatus;
+
+  @Column({ name: 'payment_method', type: 'varchar', default: PaymentMethod.INSTALLMENTS })
+  paymentMethod!: PaymentMethod;
 
   @Column({ name: 'gateway_provider' })
   gatewayProvider!: string;
