@@ -6,21 +6,15 @@ import { Suspense } from 'react';
 import { bnplApi } from '../../../lib/bnpl-api';
 import { ecommerceApi } from '../../../lib/ecommerce-api';
 import { formatPrice } from '../../../lib/format';
-import type { PaymentStatus } from '../../../lib/bnpl-types';
-
-const TERMINAL_STATUSES: PaymentStatus[] = [
-  'CAPTURED',
-  'AUTHORIZATION_FAILED',
-  'CAPTURE_FAILED',
-  'VOIDED',
-  'CANCELLED',
-];
+import { TERMINAL_PAYMENT_STATUSES } from '../../../lib/bnpl-types';
+import { useRequireAuth } from '../../../lib/use-require-auth';
 
 const TX_LABELS: Record<string, { label: string; hint: string; dot: string; idx: number }> = {
   PENDING: { label: 'Payment started', hint: 'We sent the request to the gateway. This takes a few seconds.', dot: '#a16207', idx: 0 },
   AUTHORIZED: { label: 'Authorized', hint: 'Confirming the capture with the payment gateway…', dot: '#a16207', idx: 1 },
   CAPTURED: { label: 'Captured', hint: 'Capture confirmed.', dot: '#0f7b4f', idx: 2 },
   CAPTURE_FAILED: { label: 'Payment declined', hint: 'The gateway declined the charge. No installment plan was created.', dot: '#dc2626', idx: 1 },
+  AUTHORIZATION_FAILED: { label: 'Payment declined', hint: 'The gateway declined the charge. No installment plan was created.', dot: '#dc2626', idx: 1 },
 };
 
 function dueDate(iso: string) {
@@ -40,6 +34,7 @@ function OrderConfirmationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const txParam = searchParams.get('tx');
+  const { ready } = useRequireAuth();
 
   const orderQuery = useQuery({
     queryKey: ['order', id],
@@ -56,26 +51,29 @@ function OrderConfirmationContent() {
   });
 
   const transactionId = txParam ?? paymentByOrderQuery.data?.id ?? null;
-  // True only while this order genuinely has nothing to pay/show yet — a
-  // CONFIRMED order still resolving its transactionId above must NOT show
-  // "Go to checkout" just because transactionId isn't set yet.
-  const awaitingPayment = !transactionId && orderQuery.data?.status !== 'CONFIRMED';
 
+  // Only poll by id when we arrived via ?tx= (a payment in flight). When
+  // resolved from the order instead, that transaction is necessarily already
+  // terminal (an order only reaches CONFIRMED after a capture) and
+  // paymentByOrderQuery above already fetched the same row — don't fetch it twice.
   const paymentQuery = useQuery({
     queryKey: ['payment', transactionId],
     queryFn: () => bnplApi.getPayment(transactionId!),
-    enabled: !!transactionId,
+    enabled: !!txParam,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status && TERMINAL_STATUSES.includes(status) ? false : 1000;
+      return status && TERMINAL_PAYMENT_STATUSES.includes(status) ? false : 1000;
     },
   });
 
-  const tx = paymentQuery.data;
+  const tx = txParam ? paymentQuery.data : paymentByOrderQuery.data;
   const isCaptured = tx?.status === 'CAPTURED';
   const isFailed = tx?.status === 'CAPTURE_FAILED' || tx?.status === 'AUTHORIZATION_FAILED';
   const paidInFull = isCaptured && tx?.paymentMethod === 'FULL';
   const wantsPlan = isCaptured && tx?.paymentMethod === 'INSTALLMENTS';
+  // Nothing successfully paid yet: either there's no known transaction, or the
+  // one we know about ended in a failed state and needs a fresh attempt.
+  const awaitingPayment = orderQuery.data?.status !== 'CONFIRMED' && (!transactionId || isFailed);
 
   const planQuery = useQuery({
     queryKey: ['installment-plan', id],
@@ -84,6 +82,7 @@ function OrderConfirmationContent() {
     refetchInterval: (query) => (query.state.data ? false : 1000),
   });
 
+  if (!ready) return null;
   if (orderQuery.isLoading) return <div className="mx-auto max-w-[880px] px-5 py-10 text-sm text-muted">Loading order…</div>;
   if (orderQuery.isError || !orderQuery.data) {
     return <div className="mx-auto max-w-[880px] px-5 py-10 text-sm text-red-600">Order not found.</div>;
@@ -91,7 +90,7 @@ function OrderConfirmationContent() {
 
   const order = orderQuery.data;
   const txInfo = tx ? TX_LABELS[tx.status] ?? TX_LABELS.PENDING : TX_LABELS.PENDING;
-  const terminal = !!tx && TERMINAL_STATUSES.includes(tx.status);
+  const terminal = !!tx && TERMINAL_PAYMENT_STATUSES.includes(tx.status);
 
   return (
     <div className="mx-auto flex max-w-[880px] flex-col gap-7 px-5 pb-20 pt-10">
@@ -100,19 +99,19 @@ function OrderConfirmationContent() {
           ORDER #{order.id.slice(0, 8).toUpperCase()}
         </span>
         <h1 className="m-0 text-4xl font-bold leading-[1.05] tracking-tight">
-          {awaitingPayment
-            ? 'Order created'
-            : isFailed
-              ? "We couldn't charge this order"
+          {isFailed
+            ? "We couldn't charge this order"
+            : awaitingPayment
+              ? 'Order created'
               : isCaptured
                 ? 'Done. Order confirmed'
                 : 'Confirming your payment'}
         </h1>
         <p className="m-0 max-w-[520px] text-[15px] leading-relaxed text-[#52525b]">
-          {awaitingPayment
-            ? 'This order has not been paid yet.'
-            : isFailed
-              ? 'No charge was applied. Check your payment method and try again.'
+          {isFailed
+            ? 'No charge was applied. Check your payment method and try again.'
+            : awaitingPayment
+              ? 'This order has not been paid yet.'
               : isCaptured
                 ? paidInFull
                   ? 'We emailed your receipt. The full amount was charged at once.'

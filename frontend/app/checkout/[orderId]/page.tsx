@@ -7,7 +7,7 @@ import { bnplApi } from '../../../lib/bnpl-api';
 import { ecommerceApi } from '../../../lib/ecommerce-api';
 import { formatPrice } from '../../../lib/format';
 import type { PaymentMethod } from '../../../lib/bnpl-types';
-import { useAuthStore } from '../../../store/auth-store';
+import { useRequireAuth } from '../../../lib/use-require-auth';
 
 const STEPS = ['Shipping', 'Plan', 'Review'];
 
@@ -26,7 +26,7 @@ function dueLabel(daysFromNow: number): string {
 export default function CheckoutPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
+  const { user, ready } = useRequireAuth();
   const [step, setStep] = useState(1);
   const [shipping, setShipping] = useState<'standard' | 'express'>('standard');
   const [payMode, setPayMode] = useState<PaymentMethod>('INSTALLMENTS');
@@ -61,6 +61,7 @@ export default function CheckoutPage() {
     onSuccess: (transaction) => router.push(`/orders/${orderId}?tx=${transaction.id}`),
   });
 
+  if (!ready) return null;
   if (orderQuery.isLoading) return <div className="mx-auto max-w-[1040px] px-5 py-10 text-sm text-muted">Loading order…</div>;
   if (orderQuery.isError || !orderQuery.data) {
     return <div className="mx-auto max-w-[1040px] px-5 py-10 text-sm text-red-600">Order not found.</div>;

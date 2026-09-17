@@ -30,14 +30,17 @@ export class PaymentsService {
   /**
    * Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway.
    * Guards against paying the same order twice: any existing transaction for
-   * `orderId` other than a failed authorize/capture blocks a new attempt —
-   * a failed one must remain retryable, a captured/in-flight one must not.
+   * `orderId` other than a failed authorize/capture/void blocks a new attempt —
+   * a failed or voided one must remain retryable, a captured/in-flight one must not.
    */
   async createPayment(dto: CreatePaymentDto): Promise<Transaction> {
     const existingForOrder = await this.transactions.find({ where: { orderId: dto.orderId } });
-    const blocking = existingForOrder.find(
-      (t) => t.status !== PaymentStatus.AUTHORIZATION_FAILED && t.status !== PaymentStatus.CAPTURE_FAILED,
-    );
+    const nonBlockingStatuses = new Set([
+      PaymentStatus.AUTHORIZATION_FAILED,
+      PaymentStatus.CAPTURE_FAILED,
+      PaymentStatus.VOIDED,
+    ]);
+    const blocking = existingForOrder.find((t) => !nonBlockingStatuses.has(t.status));
     if (blocking) {
       throw new ConflictException(`Order ${dto.orderId} already has a payment in status ${blocking.status}`);
     }

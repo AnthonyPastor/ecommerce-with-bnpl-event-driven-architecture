@@ -13,6 +13,15 @@ export type PaymentStatus =
 
 export type PaymentMethod = 'FULL' | 'INSTALLMENTS';
 
+/** Statuses a `Transaction` never leaves once reached — polling should stop here. */
+export const TERMINAL_PAYMENT_STATUSES: PaymentStatus[] = [
+  'CAPTURED',
+  'AUTHORIZATION_FAILED',
+  'CAPTURE_FAILED',
+  'VOIDED',
+  'CANCELLED',
+];
+
 export interface Transaction {
   id: string;
   orderId: string;

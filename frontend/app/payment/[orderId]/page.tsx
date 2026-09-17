@@ -6,6 +6,8 @@ import { Suspense } from 'react';
 import { bnplApi } from '../../../lib/bnpl-api';
 import { ecommerceApi } from '../../../lib/ecommerce-api';
 import { formatPrice } from '../../../lib/format';
+import { TERMINAL_PAYMENT_STATUSES } from '../../../lib/bnpl-types';
+import { useRequireAuth } from '../../../lib/use-require-auth';
 
 function dueDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
@@ -24,6 +26,7 @@ function PaymentDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const transactionId = searchParams.get('tx');
+  const { ready } = useRequireAuth();
 
   const orderQuery = useQuery({
     queryKey: ['order', orderId],
@@ -34,6 +37,10 @@ function PaymentDetailContent() {
     queryKey: ['payment', transactionId],
     queryFn: () => bnplApi.getPayment(transactionId!),
     enabled: !!transactionId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && TERMINAL_PAYMENT_STATUSES.includes(status) ? false : 1000;
+    },
   });
 
   const planQuery = useQuery({
@@ -42,6 +49,7 @@ function PaymentDetailContent() {
     enabled: paymentQuery.data?.status === 'CAPTURED' && paymentQuery.data?.paymentMethod === 'INSTALLMENTS',
   });
 
+  if (!ready) return null;
   if (orderQuery.isLoading || paymentQuery.isLoading) {
     return <div className="mx-auto max-w-[880px] px-5 py-10 text-sm text-muted">Loading…</div>;
   }

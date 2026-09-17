@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentsService } from './payments.service';
@@ -14,7 +14,10 @@ export class PaymentsController {
 
   /** `?orderId=` lets a client resolve "does this order already have a payment" without carrying a transactionId around. */
   @Get()
-  findByOrderId(@Query('orderId') orderId: string) {
+  findByOrderId(@Query('orderId') orderId?: string) {
+    if (!orderId) {
+      throw new BadRequestException('orderId query param is required');
+    }
     return this.paymentsService.findByOrderId(orderId);
   }
 

@@ -60,7 +60,7 @@ export class CartService {
     }
     item.quantity = quantity;
     await this.cartItems.save(item);
-    return this.getOrCreateActiveCart(userId);
+    return this.toDto(cart);
   }
 
   async removeItem(userId: string, itemId: string): Promise<CartDto> {
