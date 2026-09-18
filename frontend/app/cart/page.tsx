@@ -2,10 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ecommerceApi } from '../../lib/ecommerce-api';
-import { formatPrice } from '../../lib/format';
-import { useRequireAuth } from '../../lib/use-require-auth';
-import { Button } from '../../components/Button';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { formatPrice } from '@lib/format';
+import { useRequireAuth } from '@lib/use-require-auth';
+import { Button } from '@components/Button';
 
 type MutateArgs = { itemId: string; action: 'inc' | 'dec' | 'remove'; quantity: number };
 

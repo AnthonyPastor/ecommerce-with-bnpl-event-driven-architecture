@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EmailProviderPort, SendEmailInput } from '../ports/email-provider.port';
+import { EmailProviderPort, SendEmailInput } from '@notification/notifications/ports/email-provider.port';
 
 @Injectable()
 export class ConsoleEmailProvider extends EmailProviderPort {

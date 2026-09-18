@@ -5,6 +5,7 @@
     "declaration": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": { "@order/*": ["src/*"] },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,

@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
-import { AUTH_TOKEN_PROVIDER, TokenProviderPort } from '../ports/token-provider.port';
+import { AUTH_TOKEN_PROVIDER, TokenProviderPort } from '@auth/auth/ports/token-provider.port';
 
 export interface AuthenticatedRequest extends Request {
   user: { sub: string; email: string };

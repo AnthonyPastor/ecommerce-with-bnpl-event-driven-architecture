@@ -2,10 +2,10 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ecommerceApi } from '../lib/ecommerce-api';
-import { formatPrice } from '../lib/format';
-import type { Product } from '../lib/ecommerce-types';
-import { useAuthStore } from '../store/auth-store';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { formatPrice } from '@lib/format';
+import type { Product } from '@lib/ecommerce-types';
+import { useAuthStore } from '@store/auth-store';
 import { Button } from './Button';
 
 const STRIPES = {
