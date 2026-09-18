@@ -63,6 +63,7 @@ export class CatalogService {
       priceCents: product.priceCents,
       currency: product.currency,
       imageUrl: product.imageUrl,
+      isPro: product.isPro,
       category: product.category
         ? { id: product.category.id, name: product.category.name, slug: product.category.slug }
         : null,

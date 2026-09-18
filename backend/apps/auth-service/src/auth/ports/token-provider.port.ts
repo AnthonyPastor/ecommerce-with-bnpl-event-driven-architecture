@@ -19,11 +19,11 @@ export interface RotatedRefreshToken {
 }
 
 /**
- * Puerto abstracto del proveedor de tokens — puramente criptográfico/sin estado
- * (no toca la base de datos). La persistencia de refresh tokens (para poder
- * revocarlos/detectar reuso) vive en AuthService, no acá, para que cualquier
- * implementación futura (Auth0, Keycloak, Cognito) pueda swappearse sin tocar
- * la lógica de negocio de auth-service.
+ * Abstract port for the token provider — purely cryptographic/stateless
+ * (it never touches the database). Refresh token persistence (so they can
+ * be revoked/reuse detected) lives in AuthService, not here, so that any
+ * future implementation (Auth0, Keycloak, Cognito) can be swapped in without
+ * touching auth-service's business logic.
  */
 export abstract class TokenProviderPort {
   abstract issueAccessToken(payload: AccessTokenPayload): IssuedAccessToken;

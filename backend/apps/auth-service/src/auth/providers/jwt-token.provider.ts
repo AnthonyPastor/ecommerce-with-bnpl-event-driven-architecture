@@ -16,9 +16,9 @@ interface RefreshTokenClaims {
 }
 
 /**
- * Implementación default de TokenProviderPort: JWT propio (access + refresh
- * firmados con secretos separados). Otra implementación (Auth0/Keycloak) se
- * conecta detrás del mismo puerto sin tocar AuthService.
+ * Default implementation of TokenProviderPort: our own JWTs (access + refresh
+ * signed with separate secrets). Another implementation (Auth0/Keycloak) plugs
+ * in behind the same port without touching AuthService.
  */
 @Injectable()
 export class JwtTokenProvider extends TokenProviderPort {

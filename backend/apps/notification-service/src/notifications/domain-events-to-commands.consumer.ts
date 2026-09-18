@@ -5,11 +5,11 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SendEmailCommand } from './send-email.command';
 
 /**
- * Traductor Kafka -> RabbitMQ: escucha eventos de dominio (Kafka, inmutables,
- * audit trail) y por cada uno que nos importa publica un comando `email.send`
- * en RabbitMQ (con reintentos/DLQ — ver EmailCommandConsumer). Este consumer
- * queda "tonto" a propósito: solo traduce, no reintenta ni conoce el detalle
- * de envío.
+ * Kafka -> RabbitMQ translator: listens to domain events (Kafka, immutable,
+ * audit trail) and for each one we care about publishes an `email.send`
+ * command on RabbitMQ (with retries/DLQ — see EmailCommandConsumer). This
+ * consumer is deliberately "dumb": it only translates, it doesn't retry or
+ * know anything about delivery details.
  */
 @Injectable()
 export class DomainEventsToCommandsConsumer implements OnModuleInit {
@@ -39,16 +39,16 @@ export class DomainEventsToCommandsConsumer implements OnModuleInit {
 }
 
 /**
- * Función pura (fácil de testear sin mockear Kafka/RabbitMQ): mapea un
- * evento de dominio al comando de email correspondiente, o null si no nos
- * interesa. Exportada aparte de la clase a propósito.
+ * Pure function (easy to test without mocking Kafka/RabbitMQ): maps a
+ * domain event to the corresponding email command, or null if we don't
+ * care about it. Exported separately from the class on purpose.
  */
 export function buildEmailCommand(envelope: EventEnvelope): SendEmailCommand | null {
   const payload = envelope.payload as Record<string, unknown>;
-  // TODO: resolver userId -> email real (llamando a auth-service, o vía un
-  // read-model local alimentado por auth.user.registered.v1) — por ahora
-  // usamos el userId como "destinatario" ya que el ConsoleEmailProvider
-  // solo loguea, no entrega mails de verdad.
+  // TODO: resolve userId -> real email (by calling auth-service, or via a
+  // local read-model fed by auth.user.registered.v1) — for now we use the
+  // userId as the "recipient" since ConsoleEmailProvider only logs, it
+  // doesn't actually deliver mail.
   const to = String(payload.userId ?? 'unknown-user');
 
   switch (envelope.eventType) {

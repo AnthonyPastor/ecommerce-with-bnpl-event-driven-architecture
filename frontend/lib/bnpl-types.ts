@@ -1,0 +1,76 @@
+export type PaymentStatus =
+  | 'PENDING'
+  | 'AUTHORIZED'
+  | 'AUTHORIZATION_FAILED'
+  | 'CAPTURED'
+  | 'CAPTURE_FAILED'
+  | 'VOIDED'
+  | 'PARTIALLY_REFUNDED'
+  | 'REFUNDED'
+  | 'DISPUTED'
+  | 'CHARGEBACK'
+  | 'CANCELLED';
+
+export type PaymentMethod = 'FULL' | 'INSTALLMENTS';
+
+/** Statuses a `Transaction` never leaves once reached — polling should stop here. */
+export const TERMINAL_PAYMENT_STATUSES: PaymentStatus[] = [
+  'CAPTURED',
+  'AUTHORIZATION_FAILED',
+  'CAPTURE_FAILED',
+  'VOIDED',
+  'CANCELLED',
+];
+
+/**
+ * Mirrors payment-service's own terminal-state check (`isTerminalPaymentStatus`,
+ * derived there from `PAYMENT_TRANSITIONS`) — these are the statuses whose
+ * transaction does NOT block a new `POST /payments` for the same order. Used
+ * to decide, before ever calling the backend, whether an order already has an
+ * in-flight or captured payment that must be resumed instead of re-paid.
+ */
+export const NON_BLOCKING_PAYMENT_STATUSES: PaymentStatus[] = [
+  'AUTHORIZATION_FAILED',
+  'CAPTURE_FAILED',
+  'VOIDED',
+  'REFUNDED',
+  'CHARGEBACK',
+  'CANCELLED',
+];
+
+export interface Transaction {
+  id: string;
+  orderId: string;
+  userId: string;
+  amountCents: number;
+  currency: string;
+  status: PaymentStatus;
+  paymentMethod: PaymentMethod;
+  gatewayProvider: string;
+  gatewayReference: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type InstallmentStatus = 'PENDING' | 'DUE' | 'PAID' | 'OVERDUE' | 'DEFAULTED' | 'CANCELLED';
+
+export interface Installment {
+  id: string;
+  installmentNumber: number;
+  amountCents: number;
+  dueDate: string;
+  status: InstallmentStatus;
+}
+
+export type InstallmentPlanStatus = 'PENDING' | 'ACTIVE' | 'ADJUSTED' | 'CANCELLED' | 'DISPUTED_HOLD';
+
+export interface InstallmentPlan {
+  id: string;
+  orderId: string;
+  userId: string;
+  totalCents: number;
+  currency: string;
+  installmentsCount: number;
+  status: InstallmentPlanStatus;
+  installments: Installment[];
+}

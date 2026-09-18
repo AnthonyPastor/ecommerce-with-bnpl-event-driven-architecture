@@ -33,8 +33,8 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(input.password, 10);
     const user = this.users.create({ email: input.email, passwordHash, name: input.name });
     return this.users.save(user);
-    // TODO(fase 2+): publicar auth.user.registered.v1 vía outbox una vez que
-    // packages/outbox y packages/kafka-client existan.
+    // TODO(phase 2+): publish auth.user.registered.v1 via outbox once
+    // packages/outbox and packages/kafka-client exist.
   }
 
   async login(input: { email: string; password: string }): Promise<AuthTokens> {

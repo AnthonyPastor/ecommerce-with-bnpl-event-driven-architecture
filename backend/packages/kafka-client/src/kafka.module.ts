@@ -8,7 +8,7 @@ import { KafkaProducerService } from './kafka-producer.service';
 export interface KafkaModuleOptions {
   brokers: string[];
   clientId: string;
-  /** groupId por defecto para KafkaConsumerService.subscribe() cuando no se pasa uno explícito. */
+  /** Default groupId for KafkaConsumerService.subscribe() when none is passed explicitly. */
   groupId: string;
 }
 

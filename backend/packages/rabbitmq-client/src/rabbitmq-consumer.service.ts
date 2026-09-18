@@ -21,11 +21,11 @@ export class RabbitMqConsumerService {
   ) {}
 
   /**
-   * Consume `queue` corriendo `handler` dentro del contexto de
-   * RequestContextService. Si el handler falla: reintenta vía la cola
-   * `retry.<queue>` (TTL declarado por bindRetryTopology) hasta `maxRetries`
-   * veces (contadas en el header `x-retry-count`, que sobrevive el
-   * dead-letter de vuelta), y después de eso lo manda a `dlq.<queue>`.
+   * Consumes `queue` running `handler` inside the RequestContextService
+   * context. If the handler fails: it retries via the `retry.<queue>` queue
+   * (TTL declared by bindRetryTopology) up to `maxRetries` times (counted in
+   * the `x-retry-count` header, which survives the dead-letter trip back),
+   * and after that sends it to `dlq.<queue>`.
    */
   async subscribe<T = unknown>(
     queue: string,

@@ -16,7 +16,7 @@ export class TransactionStatusHistory {
   @Column({ name: 'to_status' })
   toStatus!: string;
 
-  /** 'sync' = disparado por el checkout (authorize/capture); 'webhook' = confirmación async del gateway. */
+  /** 'sync' = triggered by the checkout (authorize/capture); 'webhook' = async confirmation from the gateway. */
   @Column({ type: 'varchar' })
   source!: 'sync' | 'webhook';
 

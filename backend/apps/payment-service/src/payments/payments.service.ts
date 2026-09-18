@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { KafkaTopics } from '@bnpl/event-contracts';
+import { KafkaTopics, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { TransactionStatusHistory } from './entities/transaction-status-history.entity';
 import { Transaction } from './entities/transaction.entity';
 import { NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
-import { PaymentStatus, assertTransition } from './payment-state-machine';
+import { PaymentStatus, assertTransition, isTerminalPaymentStatus } from './payment-state-machine';
 
 interface TransactionPatch {
   gatewayReference?: string;
@@ -27,23 +27,57 @@ export class PaymentsService {
     private readonly requestContext: RequestContextService,
   ) {}
 
-  /** Crea la Transaction (PENDING) y dispara `authorize` sync contra el gateway. */
+  /**
+   * Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway.
+   * Guards against paying the same order twice: any existing transaction for
+   * `orderId` that isn't terminal (per PAYMENT_TRANSITIONS) blocks a new attempt —
+   * a failed, voided, refunded, or charged-back one must remain retryable, a
+   * captured/in-flight one must not.
+   *
+   * The guard-check and the PENDING insert run inside one DB transaction, guarded
+   * by a Postgres advisory lock keyed on `orderId`. A plain row lock can't help
+   * here because on the very first payment for an order there's no row yet to
+   * lock — the advisory lock serializes concurrent callers on the key itself, so
+   * a second concurrent request can't pass the "no blocking transaction" check
+   * before the first one's row is committed.
+   */
   async createPayment(dto: CreatePaymentDto): Promise<Transaction> {
-    const id = randomUUID();
-    const currency = dto.currency ?? 'USD';
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const pending = this.transactions.create({
-      id,
-      orderId: dto.orderId,
-      userId: dto.userId,
-      amountCents: dto.amountCents,
-      currency,
-      status: PaymentStatus.PENDING,
-      gatewayProvider: 'fake',
-      gatewayReference: null,
-      refundedAmountCents: 0,
-    });
-    await this.transactions.save(pending);
+    let pending: Transaction;
+    try {
+      await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [dto.orderId]);
+
+      const existingForOrder = await queryRunner.manager.find(Transaction, { where: { orderId: dto.orderId } });
+      const blocking = existingForOrder.find((t) => !isTerminalPaymentStatus(t.status));
+      if (blocking) {
+        throw new ConflictException(`Order ${dto.orderId} already has a payment in status ${blocking.status}`);
+      }
+
+      pending = queryRunner.manager.create(Transaction, {
+        id: randomUUID(),
+        orderId: dto.orderId,
+        userId: dto.userId,
+        amountCents: dto.amountCents,
+        currency: dto.currency ?? 'USD',
+        status: PaymentStatus.PENDING,
+        paymentMethod: dto.paymentMethod ?? PaymentMethod.INSTALLMENTS,
+        gatewayProvider: 'fake',
+        gatewayReference: null,
+        refundedAmountCents: 0,
+      });
+      await queryRunner.manager.save(pending);
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+
+    const { id, currency } = pending;
 
     try {
       const result = await this.gateway.authorize({
@@ -73,10 +107,10 @@ export class PaymentsService {
   }
 
   /**
-   * Endpoint dev para simular un refund (total, o parcial si `amountCents`
-   * es menor al saldo pendiente de reembolso). Dispara `gateway.refund()`,
-   * que en el FakePaymentGateway confirma por webhook async — igual que la
-   * captura — ejerciendo el mismo camino que un reembolso real.
+   * Dev endpoint to simulate a refund (full, or partial if `amountCents`
+   * is less than the outstanding refundable balance). Triggers `gateway.refund()`,
+   * which in FakePaymentGateway confirms via an async webhook — same as
+   * capture — exercising the same path as a real refund.
    */
   async refundPayment(transactionId: string, amountCents?: number): Promise<Transaction> {
     const transaction = await this.findById(transactionId);
@@ -102,7 +136,7 @@ export class PaymentsService {
     return transaction;
   }
 
-  /** Endpoint dev para cancelar (void) una transacción autorizada pero aún no capturada. */
+  /** Dev endpoint to cancel (void) an authorized but not-yet-captured transaction. */
   async voidPayment(transactionId: string): Promise<Transaction> {
     const transaction = await this.findById(transactionId);
     if (transaction.status !== PaymentStatus.AUTHORIZED) {
@@ -122,11 +156,11 @@ export class PaymentsService {
   }
 
   /**
-   * Endpoint dev que simula que la red de tarjetas notificó un chargeback —
-   * a diferencia de refund/void, esto NO lo dispara el comercio (no hay
-   * "pedirle al gateway" un chargeback), así que acá manejamos directo las
-   * dos transiciones (CAPTURED -> DISPUTED -> CHARGEBACK) sin pasar por el
-   * gateway ni por un webhook real.
+   * Dev endpoint that simulates the card network notifying a chargeback —
+   * unlike refund/void, this is NOT triggered by the merchant (there's no
+   * "asking the gateway" for a chargeback), so here we drive the two
+   * transitions directly (CAPTURED -> DISPUTED -> CHARGEBACK) without going
+   * through the gateway or a real webhook.
    */
   async simulateChargeback(transactionId: string): Promise<Transaction> {
     const transaction = await this.findById(transactionId);
@@ -157,7 +191,7 @@ export class PaymentsService {
     );
   }
 
-  /** Aplica la transición de estado que corresponde a un webhook entrante ya normalizado. */
+  /** Applies the state transition corresponding to an already-normalized incoming webhook. */
   async processWebhookEvent(transactionId: string, event: NormalizedWebhookEvent): Promise<void> {
     const transaction = await this.transactions.findOneOrFail({ where: { id: transactionId } });
 
@@ -169,6 +203,7 @@ export class PaymentsService {
           userId: transaction.userId,
           amountCents: event.amountCents ?? transaction.amountCents,
           currency: transaction.currency,
+          paymentMethod: transaction.paymentMethod,
         });
         return;
 
@@ -223,13 +258,19 @@ export class PaymentsService {
     return this.transactions.findOne({ where: { gatewayReference } });
   }
 
+  /** Scoped to `userId` so a caller can only ever see their own transactions for the order — see `PaymentsController.findByOrderId`. */
+  async findByOrderId(orderId: string, userId: string): Promise<Transaction[]> {
+    return this.transactions.find({ where: { orderId, userId }, order: { createdAt: 'DESC' } });
+  }
+
   /**
-   * Valida la transición con la state machine, persiste Transaction +
-   * TransactionStatusHistory + el evento de outbox en la MISMA transacción
-   * SQL. `source` distingue si la disparó el checkout (sync) o un webhook
-   * async del gateway — el transactionId de negocio (= order.id) se recupera
-   * siempre desde la propia Transaction, nunca del contexto HTTP actual,
-   * porque un webhook entrante es un request nuevo sin ese contexto.
+   * Validates the transition with the state machine, persists Transaction +
+   * TransactionStatusHistory + the outbox event in the SAME SQL transaction.
+   * `source` distinguishes whether the checkout triggered it (sync) or an
+   * async gateway webhook did — the business transactionId (= order.id) is
+   * always recovered from the Transaction itself, never from the current
+   * HTTP context, because an incoming webhook is a brand-new request without
+   * that context.
    */
   private async applyTransition(
     transactionId: string,

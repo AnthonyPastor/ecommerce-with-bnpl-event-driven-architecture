@@ -11,7 +11,7 @@ export class RabbitMqPublisherService {
     private readonly requestContext: RequestContextService,
   ) {}
 
-  /** Publica un comando, propagando correlationId/transactionId del contexto activo como headers. */
+  /** Publishes a command, propagating correlationId/transactionId from the active context as headers. */
   publish(exchange: string, routingKey: string, payload: unknown): boolean {
     const ctx = this.requestContext.get();
     const headers = buildCommandHeaders({

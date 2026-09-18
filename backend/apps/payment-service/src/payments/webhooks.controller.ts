@@ -37,14 +37,15 @@ export class WebhooksController {
   ) {}
 
   /**
-   * El controller solo verifica firma + persiste WebhookEvent (idempotencia)
-   * + responde rápido — el procesamiento real (aplicar la transición de
-   * estado) ocurre async vía RabbitMQ (ver WebhookProcessorConsumer), para no
-   * bloquear la respuesta al gateway y poder reintentar si algo falla.
+   * The controller only verifies the signature + persists WebhookEvent
+   * (idempotency) + responds fast — the actual processing (applying the
+   * state transition) happens async via RabbitMQ (see WebhookProcessorConsumer),
+   * so we don't block the response to the gateway and can retry if something
+   * fails.
    *
-   * Nota: para simplificar el skeleton, la "firma" se calcula sobre
-   * JSON.stringify(body) en vez del body crudo byte-exacto — una integración
-   * real necesitaría un raw-body parser dedicado para esa ruta.
+   * Note: to keep the skeleton simple, the "signature" is computed over
+   * JSON.stringify(body) instead of the byte-exact raw body — a real
+   * integration would need a dedicated raw-body parser for this route.
    */
   @Post(':gateway')
   @HttpCode(HttpStatus.OK)

@@ -1,14 +1,14 @@
 import { api, registerAndLogin, waitUntil } from './client';
 
-// Suite de sistema: asume que `docker compose -f backend/infra/docker-compose.yml
-// up -d` y los 8 servicios (`pnpm --filter <service> start:dev` o el build +
-// `node dist/main.js` de cada uno) ya están corriendo, con el api-gateway en
-// GATEWAY_URL (default http://localhost:3000/api). No levanta nada por sí
-// misma — es la suite que ejercita el sistema COMPLETO end-to-end, a
-// diferencia de los e2e por-servicio que corren cada uno aislado.
-describe('BNPL happy path (sistema completo)', () => {
+// System suite: assumes `docker compose -f backend/infra/docker-compose.yml
+// up -d` and all 8 services (`pnpm --filter <service> start:dev` or each
+// one's build + `node dist/main.js`) are already running, with api-gateway at
+// GATEWAY_URL (default http://localhost:3000/api). It doesn't start anything
+// itself — this is the suite that exercises the COMPLETE system end-to-end,
+// unlike the per-service e2e suites, which each run in isolation.
+describe('BNPL happy path (full system)', () => {
   it(
-    'registro -> catálogo -> carrito -> checkout -> pago -> captura -> plan de cuotas -> notificación',
+    'register -> catalog -> cart -> checkout -> payment -> capture -> installment plan -> notification',
     async () => {
       const { token, userId } = await registerAndLogin('e2e-happy');
 
@@ -41,13 +41,13 @@ describe('BNPL happy path (sistema completo)', () => {
       expect(payment.body.status).toBe('AUTHORIZED');
       const transactionId = payment.body.id;
 
-      // El webhook async del FakePaymentGateway confirma la captura ~2s después.
+      // FakePaymentGateway's async webhook confirms the capture ~2s later.
       await waitUntil(async () => {
         const res = await api.getPayment(token, transactionId);
         return res.body.status === 'CAPTURED';
       });
 
-      // bnpl-service reacciona al evento captured (vía Kafka) creando el plan.
+      // bnpl-service reacts to the captured event (via Kafka) by creating the plan.
       await waitUntil(async () => {
         const res = await api.getInstallmentPlans(token, orderId);
         return res.body.length > 0 && res.body[0].status === 'ACTIVE';
@@ -58,7 +58,7 @@ describe('BNPL happy path (sistema completo)', () => {
       const sum = plan.installments.reduce((acc, i) => acc + i.amountCents, 0);
       expect(sum).toBe(product.priceCents);
 
-      // notification-service reacciona al evento order.created (vía Kafka -> RabbitMQ).
+      // notification-service reacts to the order.created event (via Kafka -> RabbitMQ).
       await waitUntil(async () => {
         const res = await api.getNotifications(token, userId);
         return res.body.some((n) => n.template === 'order_confirmation');

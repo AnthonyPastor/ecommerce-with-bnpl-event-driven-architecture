@@ -23,7 +23,7 @@ export class InstallmentPlan {
   @Column({ name: 'user_id' })
   userId!: string;
 
-  /** id de la Transaction de payment-service que financió esta orden. */
+  /** id of the payment-service Transaction that financed this order. */
   @Column({ name: 'transaction_id' })
   transactionId!: string;
 

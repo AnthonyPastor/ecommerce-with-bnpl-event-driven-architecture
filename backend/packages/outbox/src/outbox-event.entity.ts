@@ -1,9 +1,9 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * Fila del transactional outbox: se escribe en la MISMA transacción SQL que
- * la entidad de dominio que la origina (ver saveWithOutbox), y un proceso
- * aparte (OutboxPublisherService) la publica a Kafka y marca publishedAt.
+ * Transactional outbox row: written in the SAME SQL transaction as
+ * the domain entity that originates it (see saveWithOutbox), and a separate
+ * process (OutboxPublisherService) publishes it to Kafka and sets publishedAt.
  */
 @Entity('outbox_events')
 export class OutboxEvent {

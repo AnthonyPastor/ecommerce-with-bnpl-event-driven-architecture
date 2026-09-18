@@ -1,59 +1,59 @@
 # Frontend
 
-Cliente ecommerce del sistema BNPL: catálogo, carrito, checkout, pago y seguimiento del plan de cuotas. Es un proyecto **standalone** (su propio `package.json`/lockfile, no forma parte del workspace de `backend/`) que habla con un único endpoint backend, el `api-gateway` — nunca llama a un microservicio directamente. Ver el [README de la raíz](../README.md) para el contexto general y el [README del backend](../backend/README.md) para la arquitectura de eventos detrás de cada pantalla.
+The BNPL system's ecommerce client: catalog, cart, checkout, payment, and installment-plan tracking. This is a **standalone** project (its own `package.json`/lockfile, not part of the `backend/` workspace) that talks to a single backend endpoint, the `api-gateway` — it never calls a microservice directly. See the [root README](../README.md) for the overall context and the [backend README](../backend/README.md) for the event architecture behind each screen.
 
-## Tecnologías
+## Technologies
 
 - **Next.js 14** (App Router)
-- **React Query** (`@tanstack/react-query`) — fetching, cache y polling de estado asíncrono
-- **Zustand** — estado de autenticación, persistido en `localStorage`
+- **React Query** (`@tanstack/react-query`) — fetching, caching, and polling of async state
+- **Zustand** — auth state, persisted to `localStorage`
 - **Tailwind CSS**
-- **Jest** + Testing Library (jsdom vía `next/jest`)
+- **Jest** + Testing Library (jsdom via `next/jest`)
 
-## Levantar el entorno
+## Getting the environment up
 
 ```bash
 pnpm install
-pnpm dev              # http://localhost:3100 (no 3000 — ese puerto es del api-gateway)
+pnpm dev              # http://localhost:3100 (not 3000 — that port belongs to api-gateway)
 ```
 
-Necesita el `api-gateway` (y todo lo que hay detrás) corriendo y accesible en `NEXT_PUBLIC_API_BASE_URL` (`.env.local`, por defecto `http://localhost:3000/api`) — ver [backend/README.md](../backend/README.md) para levantar el stack completo.
+Needs `api-gateway` (and everything behind it) running and reachable at `NEXT_PUBLIC_API_BASE_URL` (`.env.local`, defaults to `http://localhost:3000/api`) — see [backend/README.md](../backend/README.md) to bring up the full stack.
 
 ```bash
-pnpm build             # build de producción
-pnpm test              # unitarios
-pnpm test -- auth-store.test   # un solo archivo
+pnpm build             # production build
+pnpm test              # unit tests
+pnpm test -- auth-store.test   # a single file
 ```
 
-## Arquitectura
+## Architecture
 
-### Un solo cliente API, sin fetch por feature
+### One API client, no per-feature fetch calls
 
-`lib/api-client.ts` es el único lugar que habla con el backend. Su helper interno `request()` agrega `Authorization: Bearer` automáticamente desde `useAuthStore.getState().accessToken` cuando la llamada pasa `auth: true` — los componentes nunca tocan headers a mano. Al agregar una llamada nueva al backend, se agrega un método a `apiClient` acá, no un `fetch` suelto en un componente.
+`lib/api-client.ts` is the only place that talks to the backend. Its internal `request()` helper attaches `Authorization: Bearer` automatically from `useAuthStore.getState().accessToken` when the call passes `auth: true` — components never touch headers by hand. When adding a new backend call, add a method to `apiClient` here, not a loose `fetch` in a component.
 
-### Estado de auth: Zustand + persist, leído imperativamente fuera de componentes
+### Auth state: Zustand + persist, read imperatively outside components
 
-`store/auth-store.ts` guarda `{ accessToken, refreshToken, user }` y persiste a `localStorage` (middleware `persist` de Zustand). Los componentes lo leen reactivamente con el hook (`useAuthStore((s) => s.user)`); `lib/api-client.ts` lo lee de forma *imperativa* vía `useAuthStore.getState()` porque no es un componente. `setAuth(tokens, user)` / `clearAuth()` son los únicos mutadores.
+`store/auth-store.ts` holds `{ accessToken, refreshToken, user }` and persists to `localStorage` (Zustand's `persist` middleware). Components read it reactively with the hook (`useAuthStore((s) => s.user)`); `lib/api-client.ts` reads it *imperatively* via `useAuthStore.getState()` because it isn't a component. `setAuth(tokens, user)` / `clearAuth()` are the only mutators.
 
-### Login tiene una dependencia de orden
+### Login has an ordering dependency
 
-En `app/login/page.tsx` los tokens se escriben en el store *antes* de poder llamar al endpoint autenticado `/auth/me` (el token tiene que existir en el store primero, porque `api-client.ts` lo lee de ahí) — luego se llama `setAuth` de nuevo con tokens + usuario. Si se toca este flujo, hay que preservar ese orden.
+In `app/login/page.tsx`, the tokens are written to the store *before* the authenticated `/auth/me` endpoint can be called (the token has to exist in the store first, since `api-client.ts` reads it from there) — then `setAuth` is called again with both tokens and user. If you touch this flow, preserve that ordering.
 
-### Polling de estado asíncrono (pago → captura → plan de cuotas)
+### Polling async state (payment → capture → installment plan)
 
-El pago se confirma vía webhook asíncrono en el backend (ver [backend/README.md § Flujos clave](../backend/README.md#flujos-clave)), así que el frontend necesita hacer polling hasta ver el estado final. `app/orders/[id]/page.tsx` es la referencia: `refetchInterval` es una función del último dato visto por la query (`query.state.data?.status`), devuelve `false` al llegar a un estado terminal y `1000` (ms) en caso contrario. La query del plan de cuotas está gateada con `enabled: isCaptured` y deja de hacer polling apenas tiene datos (el plan no cambia de estado desde esta UI). Cualquier otra UI que necesite "esperar una transición async del backend" debería copiar este patrón en vez de inventar uno nuevo.
+The payment is confirmed via an async webhook on the backend (see [backend/README.md § Key flows](../backend/README.md#key-flows)), so the frontend needs to poll until it sees the final state. `app/orders/[id]/page.tsx` is the reference: `refetchInterval` is a function of the last data seen by the query (`query.state.data?.status`), returning `false` once a terminal state is reached and `1000` (ms) otherwise. The installment-plan query is gated on `enabled: isCaptured` and stops polling as soon as it has data (the plan doesn't change state from this UI). Any other UI that needs to "wait for an async backend transition" should copy this pattern rather than inventing a new one.
 
-### La plata siempre está en centavos
+### Money is always in cents
 
-Todo precio/monto que llega del backend es `*Cents` (entero). `lib/format.ts`'s `formatPrice(priceCents, currency)` (divide por 100, formatea con `Intl.NumberFormat` cacheado por moneda, locale `es-AR`) es el único lugar que debería hacer esa conversión — no dividir por 100 inline en otro lado.
+Every price/amount coming from the backend is `*Cents` (an integer). `lib/format.ts`'s `formatPrice(priceCents, currency)` (divides by 100, formats via a per-currency cached `Intl.NumberFormat`) is the only place that should do that conversion — don't divide by 100 inline elsewhere.
 
-## Páginas
+## Pages
 
-| Ruta | Qué hace |
+| Route | What it does |
 |---|---|
-| `/` | Catálogo de productos |
-| `/login`, `/register` | Autenticación |
-| `/cart` | Ver/editar carrito, checkout |
-| `/orders/[id]` | Estado del pago (con polling) y, una vez capturado, el plan de cuotas resultante |
+| `/` | Product catalog |
+| `/login`, `/register` | Authentication |
+| `/cart` | View/edit cart, checkout |
+| `/orders/[id]` | Payment status (with polling) and, once captured, the resulting installment plan |
 
-Más detalle en [`CLAUDE.md`](./CLAUDE.md).
+More detail in [`CLAUDE.md`](./CLAUDE.md).

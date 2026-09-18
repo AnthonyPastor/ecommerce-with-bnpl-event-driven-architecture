@@ -37,11 +37,23 @@ PARTIALLY_REFUNDED → PARTIALLY_REFUNDED | REFUNDED | DISPUTED
 DISPUTED → CHARGEBACK | CAPTURED
 ```
 
+`AUTHORIZATION_FAILED`, `CAPTURE_FAILED`, `VOIDED`, `REFUNDED`, `CHARGEBACK`, and `CANCELLED` are the terminal states (no outgoing transitions). `payment-state-machine.ts`'s `isTerminalPaymentStatus()` derives that list from `PAYMENT_TRANSITIONS` itself (an empty transitions array = terminal) rather than hand-maintaining a parallel one — see the next section for where this matters.
+
+### One payment per order at a time, race-proof
+
+`PaymentsService.createPayment()` rejects a second `POST /payments` for an order that already has a non-terminal transaction (per `isTerminalPaymentStatus()` above) — a captured/in-flight one must stay blocked, a failed/voided/refunded/charged-back one must remain retryable. The guard-check and the new `PENDING` row's insert run inside one DB transaction, opened with `SELECT pg_advisory_xact_lock(hashtext(orderId))` first: on an order's *first* payment there's no row yet for a row-level lock to serialize on, so the advisory lock serializes concurrent `createPayment` calls on the `orderId` key itself — otherwise two concurrent requests can both read "no blocking transaction" before either's insert commits, and both proceed to double-charge.
+
+### `GET /payments?orderId=` is scoped to the caller
+
+Returns only transactions whose `userId` matches the `x-user-id` header — set by `api-gateway`'s `GatewayAuthGuard` from the verified JWT before the request ever reaches this service (see that service's CLAUDE.md). Without this, any authenticated user could read another user's payment history for an order by guessing/enumerating its id.
+
 ### Repository pattern for the gateway
 
 `PaymentGatewayPort` (`src/payments/ports/payment-gateway.port.ts`) is the abstract contract (`authorize`, `capture`, `refund`, `void`, `verifyWebhookSignature`, `parseWebhookPayload`). `FakePaymentGateway` is the only implementation today, selected via the `PAYMENT_GATEWAY` DI token in `payments.module.ts`'s factory, itself driven by `PAYMENT_GATEWAY_PROVIDER` env var. A real MercadoPago/PayPal adapter implements the same port; nothing else in this service changes.
 
 **`FakePaymentGateway`'s `authorize()` is synchronous, but capture confirmation is asynchronous by design**: it schedules a real HTTP callback to this same service's `/webhooks/payments/fake` after `FAKE_GATEWAY_CAPTURE_DELAY_MS` (default 2000ms), signed with an HMAC over `JSON.stringify(payload)` (a simplification — a real gateway integration needs a raw-body parser for byte-exact signature verification, not present here). This exists specifically to exercise the real async webhook path in dev/tests, not just the sync happy path.
+
+Pending timers are tracked per `gatewayReference` (`timersByReference`), and `void()` cancels whichever one is still pending for that reference — without this, voiding a transaction while its self-scheduled `capture_succeeded` webhook is still in flight lets that webhook arrive later and drive an invalid `VOIDED → CAPTURED` transition through `WebhookProcessorConsumer`, which `assertTransition` rejects and RabbitMQ retries into the DLQ.
 
 ### The webhook pipeline: HTTP → RabbitMQ → DB, not HTTP → DB
 
@@ -63,4 +75,4 @@ Real chargebacks are card-network-initiated, not something a merchant "requests"
 
 ### Downstream consumers
 
-`bnpl-service` reacts to `payment.transaction.captured.v1` (creates the installment plan), `.refunded.v1`/`.partially_refunded.v1` (cancels/adjusts it), and `.chargeback_received.v1` (holds it + flags the credit profile). `order-service` reacts to `.refunded.v1` (marks the order `REFUNDED`). `notification-service` reacts to `.refunded.v1` (sends an email). None of these are payment-service's concern beyond knowing the outbox event is the integration point — see each service's own CLAUDE.md for their side.
+`bnpl-service` reacts to `payment.transaction.captured.v1` (creates the installment plan), `.refunded.v1`/`.partially_refunded.v1` (cancels/adjusts it), and `.chargeback_received.v1` (holds it + flags the credit profile). `order-service` reacts to `.captured.v1` (confirms the order), `.refunded.v1` (marks it `REFUNDED`), and `.partially_refunded.v1`/`.dispute_opened.v1`/`.chargeback_received.v1` (mirrors the signal onto the order so its computed payment status reflects it — see that service's CLAUDE.md). `notification-service` reacts to `.refunded.v1` (sends an email). None of these are payment-service's concern beyond knowing the outbox event is the integration point — see each service's own CLAUDE.md for their side.

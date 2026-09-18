@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 /**
- * Envelope común para todo evento de dominio publicado en Kafka.
- * correlationId/transactionId/causationId también viajan como headers
- * del mensaje Kafka (ver packages/kafka-client) para poder filtrar/propagar
- * sin deserializar el payload.
+ * Common envelope for every domain event published on Kafka.
+ * correlationId/transactionId/causationId also travel as headers
+ * on the Kafka message (see packages/kafka-client) so they can be
+ * filtered/propagated without deserializing the payload.
  */
 export interface EventEnvelope<T = unknown> {
   eventId: string;

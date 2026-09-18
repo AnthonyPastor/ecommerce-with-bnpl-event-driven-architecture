@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { InstallmentPlanStatus, InstallmentStatus, KafkaTopics } from '@bnpl/event-contracts';
+import { InstallmentPlanStatus, InstallmentStatus, KafkaTopics, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -18,6 +18,8 @@ export interface PaymentEventPayload {
   userId: string;
   amountCents: number;
   currency: string;
+  /** Only present on `payment.transaction.captured.v1` — absent on refund/chargeback events. */
+  paymentMethod?: PaymentMethod;
 }
 
 @Injectable()
@@ -32,13 +34,19 @@ export class BnplService {
   ) {}
 
   /**
-   * Reacción a `payment.transaction.captured.v1`: el comercio ya cobró
-   * completo (ver plan de arquitectura) — a partir de acá bnpl-service es
-   * quien le cobra las cuotas al consumidor por separado. Modelo real de
-   * BNPL: el scoring/aprobación es previo al cobro, acá lo simulamos
-   * siempre-aprobando ya que la transacción inicial ya se autorizó.
+   * Reaction to `payment.transaction.captured.v1`: the merchant has already
+   * been paid in full (see the architecture plan) — from this point on it's
+   * bnpl-service that charges the consumer the installments separately. Real
+   * BNPL model: scoring/approval happens before the charge; here we simulate
+   * it as always-approved since the initial transaction was already
+   * authorized.
    */
   async activatePlanForCapturedPayment(payload: PaymentEventPayload): Promise<void> {
+    if (payload.paymentMethod === PaymentMethod.FULL) {
+      this.logger.log(`Order ${payload.orderId} was paid in full, skipping installment plan creation`);
+      return;
+    }
+
     const profile = await this.creditScoring.getOrCreateProfile(payload.userId);
     if (profile.blocked) {
       this.logger.warn(
@@ -125,9 +133,10 @@ export class BnplService {
   }
 
   /**
-   * Reacción a `payment.transaction.refunded.v1` (refund total). HOY (Fase 3)
-   * nada dispara todavía este evento — payment-service no tiene el endpoint
-   * de refund (eso es Fase 5) — pero el código de reacción ya queda listo.
+   * Reaction to `payment.transaction.refunded.v1` (full refund). AS OF NOW
+   * (Phase 3) nothing triggers this event yet — payment-service doesn't have
+   * the refund endpoint (that's Phase 5) — but the reaction code is already
+   * in place.
    */
   async cancelPlanForRefund(payload: PaymentEventPayload): Promise<void> {
     const plan = await this.plans.findOne({ where: { orderId: payload.orderId }, relations: ['installments'] });
@@ -167,8 +176,8 @@ export class BnplService {
   }
 
   /**
-   * Reacción a `payment.transaction.partially_refunded.v1`. Igual que arriba:
-   * el código ya está listo, pero nada lo dispara hasta la Fase 5.
+   * Reaction to `payment.transaction.partially_refunded.v1`. Same as above:
+   * the code is already in place, but nothing triggers it until Phase 5.
    */
   async adjustPlanForPartialRefund(payload: PaymentEventPayload): Promise<void> {
     const plan = await this.plans.findOne({ where: { orderId: payload.orderId }, relations: ['installments'] });
@@ -212,10 +221,10 @@ export class BnplService {
   }
 
   /**
-   * Reacción a `payment.transaction.chargeback_received.v1`: pausa cobros y
-   * marca el perfil para re-scoring manual — no hay evento de dominio nuevo
-   * para esto en el catálogo, es puramente un cambio de estado interno.
-   * Igual que refund/partial-refund, nada dispara esto todavía en Fase 3.
+   * Reaction to `payment.transaction.chargeback_received.v1`: pauses charges
+   * and flags the profile for manual re-scoring — there is no new domain
+   * event for this in the catalog, it's purely an internal state change.
+   * Same as refund/partial-refund, nothing triggers this yet in Phase 3.
    */
   async holdPlanForChargeback(payload: PaymentEventPayload): Promise<void> {
     const plan = await this.plans.findOne({ where: { orderId: payload.orderId } });

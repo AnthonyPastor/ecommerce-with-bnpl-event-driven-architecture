@@ -15,13 +15,13 @@ import {
 } from '../ports/payment-gateway.port';
 
 /**
- * Implementación fake del payment gateway: `authorize` responde sync
- * (como haría cualquier gateway real al autorizar), pero la confirmación de
- * captura llega ASYNC vía un webhook simulado que este mismo gateway se
- * auto-dispara (self-loopback HTTP real a `PAYMENT_SERVICE_SELF_URL`) con un
- * delay corto — así se ejercita el camino asíncrono real (webhook controller
- * -> idempotencia -> RabbitMQ -> consumer -> transición de estado) desde el
- * día uno, no solo el happy path síncrono.
+ * Fake implementation of the payment gateway: `authorize` responds sync
+ * (as any real gateway would when authorizing), but capture confirmation
+ * arrives ASYNC via a simulated webhook that this same gateway
+ * self-triggers (a real self-loopback HTTP call to `PAYMENT_SERVICE_SELF_URL`)
+ * after a short delay — this exercises the real async path (webhook controller
+ * -> idempotency -> RabbitMQ -> consumer -> state transition) from
+ * day one, not just the sync happy path.
  */
 @Injectable()
 export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDestroy {
@@ -29,7 +29,14 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   private readonly secret: string;
   private readonly selfBaseUrl: string;
   private readonly captureDelayMs: number;
-  private readonly timers = new Set<NodeJS.Timeout>();
+  /**
+   * Pending simulated-webhook timers, keyed by `gatewayReference` (stable per
+   * transaction). Lets `void()` cancel a still-pending `capture_succeeded`
+   * webhook scheduled by `authorize()` — otherwise it fires after the void and
+   * `WebhookProcessorConsumer` tries `VOIDED -> CAPTURED`, an invalid
+   * transition that exhausts RabbitMQ retries into the DLQ every time.
+   */
+  private readonly timersByReference = new Map<string, Set<NodeJS.Timeout>>();
 
   constructor(private readonly config: ConfigService) {
     super();
@@ -64,6 +71,7 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   }
 
   async void(input: VoidInput): Promise<VoidResult> {
+    this.cancelPendingWebhooks(input.gatewayReference);
     return { gatewayReference: input.gatewayReference };
   }
 
@@ -78,12 +86,35 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
 
   private scheduleWebhook(event: NormalizedWebhookEvent): void {
     const timer = setTimeout(() => {
-      this.timers.delete(timer);
+      this.removeTimer(event.gatewayReference, timer);
       this.sendWebhook(event).catch((err: Error) =>
         this.logger.error(`Failed to deliver simulated webhook: ${err.message}`),
       );
     }, this.captureDelayMs);
-    this.timers.add(timer);
+    this.addTimer(event.gatewayReference, timer);
+  }
+
+  private addTimer(gatewayReference: string, timer: NodeJS.Timeout): void {
+    let timers = this.timersByReference.get(gatewayReference);
+    if (!timers) {
+      timers = new Set();
+      this.timersByReference.set(gatewayReference, timers);
+    }
+    timers.add(timer);
+  }
+
+  private removeTimer(gatewayReference: string, timer: NodeJS.Timeout): void {
+    const timers = this.timersByReference.get(gatewayReference);
+    if (!timers) return;
+    timers.delete(timer);
+    if (timers.size === 0) this.timersByReference.delete(gatewayReference);
+  }
+
+  private cancelPendingWebhooks(gatewayReference: string): void {
+    const timers = this.timersByReference.get(gatewayReference);
+    if (!timers) return;
+    for (const timer of timers) clearTimeout(timer);
+    this.timersByReference.delete(gatewayReference);
   }
 
   private async sendWebhook(event: NormalizedWebhookEvent): Promise<void> {
@@ -97,7 +128,9 @@ export class FakePaymentGateway extends PaymentGatewayPort implements OnModuleDe
   }
 
   onModuleDestroy(): void {
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
+    for (const timers of this.timersByReference.values()) {
+      for (const timer of timers) clearTimeout(timer);
+    }
+    this.timersByReference.clear();
   }
 }

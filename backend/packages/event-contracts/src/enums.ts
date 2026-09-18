@@ -12,7 +12,7 @@ export enum PaymentStatus {
   CANCELLED = 'CANCELLED',
 }
 
-/** Mapa de transiciones válidas de la state machine de Payment/Transaction. */
+/** Map of valid transitions for the Payment/Transaction state machine. */
 export const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.PENDING]: [
     PaymentStatus.AUTHORIZED,
@@ -65,4 +65,14 @@ export enum OrderStatus {
   CONFIRMED = 'CONFIRMED',
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
+}
+
+/**
+ * How the consumer chose to settle an order at payment time. Carried on
+ * `Transaction.paymentMethod` and threaded into `payment.transaction.captured.v1`
+ * so bnpl-service knows whether to spin up an installment plan at all.
+ */
+export enum PaymentMethod {
+  FULL = 'FULL',
+  INSTALLMENTS = 'INSTALLMENTS',
 }

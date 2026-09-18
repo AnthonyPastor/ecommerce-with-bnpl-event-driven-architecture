@@ -19,10 +19,10 @@ export class KafkaConsumerService implements OnModuleDestroy {
   ) {}
 
   /**
-   * Se suscribe a `topics` y corre `handler` por cada mensaje DENTRO del
-   * contexto de RequestContextService (correlationId/transactionId extraídos
-   * de los headers del mensaje) — logs y eventos nuevos emitidos durante el
-   * procesamiento heredan ese contexto automáticamente.
+   * Subscribes to `topics` and runs `handler` for each message INSIDE the
+   * RequestContextService context (correlationId/transactionId extracted
+   * from the message headers) — logs and new events emitted during
+   * processing automatically inherit that context.
    */
   async subscribe(topics: string[], handler: KafkaEventHandler, groupId?: string): Promise<void> {
     const consumer = this.kafka.consumer({ groupId: groupId ?? this.defaultGroupId });
@@ -54,11 +54,11 @@ export class KafkaConsumerService implements OnModuleDestroy {
   }
 
   /**
-   * En un broker single-node recién levantado, un topic auto-creado (por ser
-   * la primera vez que alguien lo produce/consume) puede tardar un instante
-   * en propagar su metadata — sin retry, `consumer.subscribe()` tira
-   * "This server does not host this topic-partition" y el bootstrap del
-   * servicio entero falla. Reintentamos unas pocas veces antes de rendirnos.
+   * On a freshly started single-node broker, an auto-created topic (because
+   * it's the first time anyone produces/consumes it) can take a moment to
+   * propagate its metadata — without retry, `consumer.subscribe()` throws
+   * "This server does not host this topic-partition" and the entire
+   * service's bootstrap fails. We retry a few times before giving up.
    */
   private async subscribeWithRetry(
     consumer: Consumer,

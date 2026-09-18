@@ -5,8 +5,14 @@ import { Product } from './catalog/entities/product.entity';
 import { ProductVariant } from './catalog/entities/product-variant.entity';
 
 /**
- * Seed manual de datos de ejemplo. Correr con `pnpm --filter catalog-service run seed`
- * contra la DB ya levantada por docker-compose.
+ * Manual seed of the Veloce shoe-store catalog. Run with
+ * `pnpm --filter catalog-service run seed` against the DB already started by
+ * docker-compose. Idempotent (matches by slug/name) — safe to re-run.
+ *
+ * To re-seed cleanly against a DB that already has the old generic sample
+ * data (headphones, t-shirts, etc.), truncate `products`, `categories`, and
+ * `product_variants` first — this is dev-only since `synchronize: true` is
+ * already the deliberate DB strategy here, not a migration concern.
  */
 async function seed() {
   const dataSource = new DataSource({
@@ -27,104 +33,112 @@ async function seed() {
   const variantRepo = dataSource.getRepository(ProductVariant);
 
   const categoriesData = [
-    { name: 'Electrónica', slug: 'electronica' },
-    { name: 'Indumentaria', slug: 'indumentaria' },
-    { name: 'Hogar', slug: 'hogar' },
+    { name: 'Running', slug: 'running' },
+    { name: 'Lifestyle', slug: 'lifestyle' },
+    { name: 'Trail', slug: 'trail' },
+    { name: 'Court', slug: 'court' },
   ];
 
-  const categories: Category[] = [];
+  const categoriesBySlug = new Map<string, Category>();
   for (const data of categoriesData) {
     let category = await categoryRepo.findOne({ where: { slug: data.slug } });
     if (!category) {
       category = await categoryRepo.save(categoryRepo.create(data));
     }
-    categories.push(category);
+    categoriesBySlug.set(data.slug, category);
   }
 
-  const [electronica, indumentaria, hogar] = categories;
+  const SIZES = ['US 7', 'US 8', 'US 9', 'US 10', 'US 11', 'US 12'];
 
   const productsData: Array<{
     name: string;
     description: string;
     priceCents: number;
-    category: Category;
-    imageUrl?: string;
-    variants?: Array<{ name: string; priceCents: number; stock: number }>;
+    categorySlug: string;
+    stockOut: string[];
+    isPro?: boolean;
   }> = [
     {
-      name: 'Auriculares Bluetooth',
-      description: 'Auriculares inalámbricos con cancelación de ruido.',
-      priceCents: 8999,
-      category: electronica,
-      variants: [
-        { name: 'Negro', priceCents: 8999, stock: 25 },
-        { name: 'Blanco', priceCents: 8999, stock: 15 },
-      ],
+      name: 'Kinetic 1',
+      description: 'Propulsion plate and high-rebound foam for fast training days.',
+      priceCents: 13900,
+      categorySlug: 'running',
+      stockOut: ['US 7'],
     },
     {
-      name: 'Smartwatch Serie 5',
-      description: 'Reloj inteligente con monitor de ritmo cardíaco.',
-      priceCents: 19999,
-      category: electronica,
-      variants: [
-        { name: '40mm', priceCents: 19999, stock: 10 },
-        { name: '44mm', priceCents: 21999, stock: 8 },
-      ],
+      name: 'Kinetic Pro Carbon',
+      description: 'Full carbon plate. Built for race day and track intervals.',
+      priceCents: 22900,
+      categorySlug: 'running',
+      stockOut: ['US 12'],
+      isPro: true,
     },
     {
-      name: 'Parlante Portátil',
-      description: 'Parlante Bluetooth resistente al agua.',
-      priceCents: 5499,
-      category: electronica,
+      name: 'Kinetic Rebound',
+      description: 'Stable cushioning for daily mileage.',
+      priceCents: 16900,
+      categorySlug: 'running',
+      stockOut: [],
     },
     {
-      name: 'Remera Básica',
-      description: 'Remera de algodón 100%.',
-      priceCents: 2499,
-      category: indumentaria,
-      variants: [
-        { name: 'S', priceCents: 2499, stock: 30 },
-        { name: 'M', priceCents: 2499, stock: 40 },
-        { name: 'L', priceCents: 2499, stock: 20 },
-      ],
+      name: 'Trace Court Low',
+      description: 'Classic court silhouette in smooth leather.',
+      priceCents: 9900,
+      categorySlug: 'lifestyle',
+      stockOut: ['US 8', 'US 11'],
     },
     {
-      name: 'Campera de Abrigo',
-      description: 'Campera impermeable para invierno.',
-      priceCents: 12999,
-      category: indumentaria,
-      variants: [
-        { name: 'M', priceCents: 12999, stock: 12 },
-        { name: 'L', priceCents: 12999, stock: 9 },
-      ],
+      name: 'Trace Court High',
+      description: 'High top with vulcanized rubber sole.',
+      priceCents: 11900,
+      categorySlug: 'lifestyle',
+      stockOut: [],
     },
     {
-      name: 'Zapatillas Urbanas',
-      description: 'Zapatillas casuales para uso diario.',
-      priceCents: 15999,
-      category: indumentaria,
+      name: 'Pulse Street 90',
+      description: 'Mesh and synthetic upper with visible air unit.',
+      priceCents: 10900,
+      categorySlug: 'lifestyle',
+      stockOut: ['US 7'],
     },
     {
-      name: 'Juego de Sábanas',
-      description: 'Sábanas 100% algodón, plaza y media.',
-      priceCents: 7499,
-      category: hogar,
+      name: 'Studio Knit Slip',
+      description: 'Laceless knit build for all-day wear.',
+      priceCents: 7900,
+      categorySlug: 'lifestyle',
+      stockOut: [],
     },
     {
-      name: 'Cafetera Eléctrica',
-      description: 'Cafetera de filtro de 12 tazas.',
-      priceCents: 10999,
-      category: hogar,
-      variants: [
-        { name: 'Negra', priceCents: 10999, stock: 18 },
-        { name: 'Plateada', priceCents: 11999, stock: 6 },
-      ],
+      name: 'Drift Trail GTX',
+      description: 'Waterproof membrane with 4 mm lugs.',
+      priceCents: 17900,
+      categorySlug: 'trail',
+      stockOut: ['US 9'],
+    },
+    {
+      name: 'Ridge Trail 2',
+      description: 'Lightweight chassis for technical trails.',
+      priceCents: 15900,
+      categorySlug: 'trail',
+      stockOut: [],
+    },
+    {
+      name: 'Arena Court Pro',
+      description: 'Reinforced lateral support for indoor court.',
+      priceCents: 12900,
+      categorySlug: 'court',
+      stockOut: ['US 10'],
     },
   ];
 
   for (const data of productsData) {
+    const isPro = data.isPro ?? false;
     const existing = await productRepo.findOne({ where: { name: data.name } });
     if (existing) {
+      if (existing.isPro !== isPro) {
+        existing.isPro = isPro;
+        await productRepo.save(existing);
+      }
       continue;
     }
 
@@ -133,25 +147,31 @@ async function seed() {
         name: data.name,
         description: data.description,
         priceCents: data.priceCents,
-        category: data.category,
-        imageUrl: data.imageUrl ?? null,
+        category: categoriesBySlug.get(data.categorySlug) ?? null,
+        imageUrl: null,
+        isPro,
       }),
     );
 
-    if (data.variants) {
-      for (const variant of data.variants) {
-        await variantRepo.save(variantRepo.create({ ...variant, product }));
-      }
+    for (const size of SIZES) {
+      await variantRepo.save(
+        variantRepo.create({
+          product,
+          name: size,
+          priceCents: data.priceCents,
+          stock: data.stockOut.includes(size) ? 0 : 6,
+        }),
+      );
     }
   }
 
   // eslint-disable-next-line no-console
-  console.log('Seed completo.');
+  console.log('Seed complete.');
   await dataSource.destroy();
 }
 
 seed().catch((err) => {
   // eslint-disable-next-line no-console
-  console.error('Seed falló:', err);
+  console.error('Seed failed:', err);
   process.exit(1);
 });

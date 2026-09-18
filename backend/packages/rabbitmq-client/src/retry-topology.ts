@@ -4,7 +4,7 @@ export interface RetryTopologyOptions {
   exchange: string;
   routingKey: string;
   queue: string;
-  /** TTL de la cola de reintento antes de reinyectar en la cola principal. */
+  /** TTL of the retry queue before re-injecting into the main queue. */
   retryDelayMs: number;
 }
 
@@ -17,11 +17,11 @@ export function dlqName(queue: string): string {
 }
 
 /**
- * Declara: exchange topic + cola principal bindeada, cola de retry (TTL fijo,
- * al expirar reinyecta en la cola principal vía dead-letter al exchange por
- * default con routing key = nombre de la cola principal), y la DLQ final.
- * El conteo de reintentos lo maneja el consumer (header x-retry-count), no
- * esta topología — ver RabbitMqConsumerService.
+ * Declares: topic exchange + bound main queue, retry queue (fixed TTL,
+ * on expiry re-injects into the main queue via dead-letter to the default
+ * exchange with routing key = main queue name), and the final DLQ.
+ * Retry counting is handled by the consumer (x-retry-count header), not
+ * by this topology — see RabbitMqConsumerService.
  */
 export async function bindRetryTopology(channel: Channel, options: RetryTopologyOptions): Promise<void> {
   const { exchange, routingKey, queue, retryDelayMs } = options;

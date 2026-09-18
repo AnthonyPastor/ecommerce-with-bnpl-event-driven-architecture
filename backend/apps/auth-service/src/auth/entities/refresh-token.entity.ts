@@ -10,8 +10,8 @@ import {
 import { User } from './user.entity';
 
 /**
- * Guarda el HASH del refresh token (nunca el valor plano) para poder
- * revocarlo/rotarlo sin quedar expuesto si se filtra la DB.
+ * Stores the HASH of the refresh token (never the plain value) so it can
+ * be revoked/rotated without being exposed if the DB leaks.
  */
 @Entity('refresh_tokens')
 export class RefreshToken {

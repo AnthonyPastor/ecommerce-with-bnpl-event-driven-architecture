@@ -1,5 +1,5 @@
 /**
- * Catálogo de tópicos Kafka (eventos de dominio inmutables).
+ * Catalog of Kafka topics (immutable domain events).
  * Naming: <domain>.<entity>.<event>.v1
  */
 export const KafkaTopics = {
@@ -39,13 +39,13 @@ export const KafkaTopics = {
   },
 } as const;
 
-/** Todos los tópicos Kafka que debe conocer un consumer wildcard (ej. el puente Kafka->RabbitMQ). */
+/** All the Kafka topics a wildcard consumer must know about (e.g. the Kafka->RabbitMQ bridge). */
 export const ALL_KAFKA_TOPICS: string[] = Object.values(KafkaTopics).flatMap((group) =>
   Object.values(group),
 );
 
 /**
- * Exchanges/colas RabbitMQ (comandos/tareas punto a punto, con retry/DLQ).
+ * RabbitMQ exchanges/queues (point-to-point commands/tasks, with retry/DLQ).
  */
 export const RabbitMqTopology = {
   exchange: 'commands',

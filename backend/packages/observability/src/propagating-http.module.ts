@@ -7,11 +7,11 @@ import { RequestContextModule } from './request-context.module';
 import { RequestContextService } from './request-context.service';
 
 /**
- * Wrapper de HttpService que, en cada llamada saliente entre servicios, toma
- * correlationId/transactionId del contexto activo y los setea como headers
- * salientes — así un webhook entrante en un request nuevo recupera el mismo
- * transactionId que el resto del flujo, y el correlationId se propaga sin
- * que cada caller tenga que acordarse de pasarlo.
+ * HttpService wrapper that, on every outgoing call between services, takes
+ * correlationId/transactionId from the active context and sets them as
+ * outbound headers — so an inbound webhook on a brand-new request recovers
+ * the same transactionId as the rest of the flow, and the correlationId is
+ * propagated without every caller having to remember to pass it.
  */
 @Injectable()
 export class PropagatingHttpService {
