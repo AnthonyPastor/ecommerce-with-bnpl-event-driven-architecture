@@ -2,10 +2,10 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ecommerceApi } from '../../lib/ecommerce-api';
-import type { Order } from '../../lib/ecommerce-types';
-import { formatPrice } from '../../lib/format';
-import { useRequireAuth } from '../../lib/use-require-auth';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import type { Order } from '@lib/ecommerce-types';
+import { formatPrice } from '@lib/format';
+import { useRequireAuth } from '@lib/use-require-auth';
 
 const PAYMENT_STATUS_BADGE: Record<Order['paymentStatus'], { label: string; color: string; borderColor: string }> = {
   UNPAID: { label: 'Created', color: '#71717a', borderColor: '#e4e4e7' },

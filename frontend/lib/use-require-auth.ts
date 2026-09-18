@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { useAuthStore } from '../store/auth-store';
+import { useAuthStore } from '@store/auth-store';
 
 /**
  * Guards a client page behind auth. Redirects to /login once the persisted

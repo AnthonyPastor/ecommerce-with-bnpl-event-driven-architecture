@@ -3,11 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { ecommerceApi } from '../../../lib/ecommerce-api';
-import type { PaginatedProducts } from '../../../lib/ecommerce-types';
-import { formatPrice } from '../../../lib/format';
-import { useAuthStore } from '../../../store/auth-store';
-import { Button } from '../../../components/Button';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import type { PaginatedProducts } from '@lib/ecommerce-types';
+import { formatPrice } from '@lib/format';
+import { useAuthStore } from '@store/auth-store';
+import { Button } from '@components/Button';
 
 const STRIPES = {
   backgroundColor: '#ffffff',

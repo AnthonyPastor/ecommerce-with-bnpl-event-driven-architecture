@@ -3,11 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { bnplApi } from '../../../lib/bnpl-api';
-import { ecommerceApi } from '../../../lib/ecommerce-api';
-import { formatPrice } from '../../../lib/format';
-import { TERMINAL_PAYMENT_STATUSES } from '../../../lib/bnpl-types';
-import { useRequireAuth } from '../../../lib/use-require-auth';
+import { bnplApi } from '@lib/bnpl-api';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { formatPrice } from '@lib/format';
+import { TERMINAL_PAYMENT_STATUSES } from '@lib/bnpl-types';
+import { useRequireAuth } from '@lib/use-require-auth';
 
 function dueDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { day: '2-digit', month: 'short' });

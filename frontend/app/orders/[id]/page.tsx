@@ -3,11 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { bnplApi } from '../../../lib/bnpl-api';
-import { ecommerceApi } from '../../../lib/ecommerce-api';
-import { formatPrice } from '../../../lib/format';
-import { TERMINAL_PAYMENT_STATUSES } from '../../../lib/bnpl-types';
-import { useRequireAuth } from '../../../lib/use-require-auth';
+import { bnplApi } from '@lib/bnpl-api';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { formatPrice } from '@lib/format';
+import { TERMINAL_PAYMENT_STATUSES } from '@lib/bnpl-types';
+import { useRequireAuth } from '@lib/use-require-auth';
 
 const TX_LABELS: Record<string, { label: string; hint: string; dot: string; idx: number }> = {
   PENDING: { label: 'Payment started', hint: 'We sent the request to the gateway. This takes a few seconds.', dot: '#a16207', idx: 0 },

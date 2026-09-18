@@ -12,7 +12,7 @@ import {
   RefundResult,
   VoidInput,
   VoidResult,
-} from '../ports/payment-gateway.port';
+} from '@payment/payments/ports/payment-gateway.port';
 
 /**
  * Fake implementation of the payment gateway: `authorize` responds sync

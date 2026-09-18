@@ -1,4 +1,4 @@
-import { createProxyController } from '../proxy/create-proxy-controller';
+import { createProxyController } from '@gateway/proxy/create-proxy-controller';
 
 /** Always protected. bnpl-service's routes already match this mount segment, so strip only /api. */
 export const InstallmentPlansController = createProxyController(

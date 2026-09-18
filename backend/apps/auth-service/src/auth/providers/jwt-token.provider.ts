@@ -8,7 +8,7 @@ import {
   IssuedRefreshToken,
   RotatedRefreshToken,
   TokenProviderPort,
-} from '../ports/token-provider.port';
+} from '@auth/auth/ports/token-provider.port';
 
 interface RefreshTokenClaims {
   sub: string;

@@ -5,6 +5,7 @@
     "declaration": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": { "@auth/*": ["src/*"] },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,

@@ -4,9 +4,9 @@ import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
-import { ecommerceApi } from '../../lib/ecommerce-api';
-import { useAuthStore } from '../../store/auth-store';
-import { Button } from '../../components/Button';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { useAuthStore } from '@store/auth-store';
+import { Button } from '@components/Button';
 
 const PERKS = [
   'Approved in seconds, no impact on your credit history.',

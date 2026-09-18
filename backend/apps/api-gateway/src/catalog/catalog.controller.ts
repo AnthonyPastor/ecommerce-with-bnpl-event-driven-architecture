@@ -1,8 +1,8 @@
 import { All, Controller, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
-import { Public } from '../common/public.decorator';
-import { ProxyService } from '../proxy/proxy.service';
+import { Public } from '@gateway/common/public.decorator';
+import { ProxyService } from '@gateway/proxy/proxy.service';
 
 /** Public browsing (ecommerce catalog) — catalog-service exposes bare routes (e.g. /products), so strip /api/catalog entirely. */
 @Controller('catalog')
