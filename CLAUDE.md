@@ -26,6 +26,10 @@ cd backend && pnpm infra:up      # / infra:down
 # everything else — see backend/README.md and frontend/README.md
 ```
 
+## Git workflow: one feature per branch/PR
+
+Work in a dedicated branch per feature/fix (branched off `main`, or off `dev` while that's the active integration branch) and open a **separate PR per feature** rather than batching multiple unrelated changes into one branch before opening a PR — even if they land back-to-back in the same session. This applies to both `dev`→`main` PRs and any feature branch. A large multi-feature PR (e.g. a docs translation + a full frontend redesign + a design-system swap, all in one PR) is hard to review and hard to revert independently — that's a real, hard-to-reverse-by-then mistake to avoid by scoping the branch *before* starting work, not by trying to untangle it after the fact (once review comments and fix-up commits land on top and start touching files from more than one feature, a clean retroactive split is no longer realistically possible).
+
 ## Architecture (system-wide)
 
 ### Nine independent projects, one gateway
