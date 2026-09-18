@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ecommerceApi } from '../../lib/ecommerce-api';
 import { formatPrice } from '../../lib/format';
 import { useRequireAuth } from '../../lib/use-require-auth';
+import { Button } from '../../components/Button';
 
 type MutateArgs = { itemId: string; action: 'inc' | 'dec' | 'remove'; quantity: number };
 
@@ -41,7 +42,7 @@ export default function CartPage() {
   const isBusy = (itemId: string) => mutateItem.isPending && mutateItem.variables?.itemId === itemId;
 
   return (
-    <div className="mx-auto max-w-[1100px] px-5 pb-20 pt-10">
+    <div className="mx-auto w-full max-w-[1100px] px-5 pb-20 pt-10">
       <h1 className="m-0 mb-7 text-[38px] font-bold uppercase leading-none tracking-tight">Your cart</h1>
 
       {cartQuery.isLoading && (
@@ -65,9 +66,9 @@ export default function CartPage() {
           <p className="m-0 max-w-[380px] text-sm leading-relaxed text-[#71717a]">
             Add a pair from the catalog and it will show up in this summary.
           </p>
-          <button onClick={() => router.push('/')} className="bg-ink px-5 py-3 text-xs font-semibold uppercase tracking-wide text-white">
+          <Button variant="primary" size="md" onClick={() => router.push('/')}>
             Browse catalog
-          </button>
+          </Button>
         </div>
       )}
 
@@ -116,13 +117,13 @@ export default function CartPage() {
                           +
                         </button>
                       </div>
-                      <button
+                      <Button
+                        variant="danger"
                         disabled={busy}
                         onClick={() => mutateItem.mutate({ itemId: item.id, action: 'remove', quantity: 0 })}
-                        className="text-xs text-muted underline hover:text-red-600"
                       >
                         Remove
-                      </button>
+                      </Button>
                       {busy && (
                         <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-muted">
                           <span className="block h-[11px] w-[11px] animate-vspin rounded-full border-2 border-hair border-t-accent" />
@@ -141,9 +142,9 @@ export default function CartPage() {
               );
             })}
             <div className="mt-1 border-t border-hair pt-5">
-              <button onClick={() => router.push('/')} className="font-mono text-[11px] uppercase tracking-wide text-[#71717a]">
+              <Button variant="ghost" onClick={() => router.push('/')}>
                 Keep shopping
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -163,13 +164,9 @@ export default function CartPage() {
               <span className="text-[13px] font-semibold uppercase tracking-wide">Total</span>
               <span className="text-[26px] font-bold tracking-tight">{formatPrice(cartQuery.data.totalCents, 'USD')}</span>
             </div>
-            <button
-              onClick={() => checkout.mutate()}
-              disabled={checkout.isPending}
-              className="bg-ink py-4 text-[13px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-70"
-            >
+            <Button variant="primary" size="lg" full onClick={() => checkout.mutate()} disabled={checkout.isPending}>
               {checkout.isPending ? 'Processing…' : 'Go to checkout'}
-            </button>
+            </Button>
             <span className="text-[11px] leading-relaxed text-muted">
               Continuing creates the order; payment is confirmed in the next step.
             </span>

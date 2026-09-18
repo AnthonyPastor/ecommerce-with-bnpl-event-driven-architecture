@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
 import { ProductCard } from '../components/ProductCard';
+import { Button } from '../components/Button';
 import { ecommerceApi } from '../lib/ecommerce-api';
 
 type SortKey = 'featured' | 'priceAsc' | 'priceDesc';
@@ -35,6 +36,7 @@ function HomeContent() {
     queryKey: ['products', activeCategory?.id ?? 'all'],
     queryFn: () => ecommerceApi.getProducts({ page: 1, pageSize: 100, categoryId: activeCategory?.id }),
     enabled: !categorySlug || !!activeCategory,
+    staleTime: 5 * 60 * 1000,
   });
 
   const visibleProducts = useMemo(() => {
@@ -85,7 +87,7 @@ function HomeContent() {
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-[1280px] flex-wrap items-start gap-10 px-5 py-8 pb-16">
+      <div className="mx-auto flex w-full max-w-[1280px] flex-wrap items-start gap-10 px-5 py-8 pb-16">
         <aside className="sticky top-[92px] w-[216px] shrink-0">
           <div className="flex flex-col gap-7">
             <div className="flex flex-col gap-2.5">
@@ -173,12 +175,9 @@ function HomeContent() {
               <p className="m-0 max-w-[460px] text-sm leading-relaxed text-[#71717a]">
                 The catalog did not respond. Try again; if it persists, check the api-gateway status.
               </p>
-              <button
-                onClick={() => productsQuery.refetch()}
-                className="bg-ink px-[18px] py-2.5 text-xs font-semibold uppercase tracking-wide text-white"
-              >
+              <Button variant="primary" size="md" onClick={() => productsQuery.refetch()}>
                 Try again
-              </button>
+              </Button>
             </div>
           )}
 
@@ -188,15 +187,16 @@ function HomeContent() {
               <p className="m-0 text-xl font-semibold tracking-tight">
                 {query ? `«${query}»` : activeCategory?.name}
               </p>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => {
                   setQuery('');
                   router.push('/');
                 }}
-                className="border border-ink px-4 py-2.5 text-xs font-semibold uppercase tracking-wide"
               >
                 Clear filters
-              </button>
+              </Button>
             </div>
           )}
 

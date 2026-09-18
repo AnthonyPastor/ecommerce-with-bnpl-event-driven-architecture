@@ -71,7 +71,7 @@ function PaymentDetailContent() {
   const next = installments.find((i) => i.status !== 'PAID');
 
   return (
-    <div className="mx-auto max-w-[880px] px-5 pb-20 pt-6">
+    <div className="mx-auto w-full max-w-[880px] px-5 pb-20 pt-6">
       <button
         onClick={() => router.push(`/orders/${orderId}?tx=${transactionId}`)}
         className="mb-[22px] font-mono text-[11px] uppercase tracking-wide text-[#71717a]"

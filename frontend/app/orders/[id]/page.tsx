@@ -93,7 +93,7 @@ function OrderConfirmationContent() {
   const terminal = !!tx && TERMINAL_PAYMENT_STATUSES.includes(tx.status);
 
   return (
-    <div className="mx-auto flex max-w-[880px] flex-col gap-7 px-5 pb-20 pt-10">
+    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-7 px-5 pb-20 pt-10">
       <div className="flex flex-col gap-2.5">
         <span className="font-mono text-[11px] uppercase tracking-wide text-muted">
           ORDER #{order.id.slice(0, 8).toUpperCase()}

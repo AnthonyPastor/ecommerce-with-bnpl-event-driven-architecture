@@ -31,7 +31,7 @@ export default function OrdersListPage() {
   const orders = ordersQuery.data ?? [];
 
   return (
-    <div className="mx-auto max-w-[940px] px-5 pb-20 pt-10">
+    <div className="mx-auto w-full max-w-[940px] px-5 pb-20 pt-10">
       <h1 className="m-0 mb-7 text-[38px] font-bold uppercase leading-none tracking-tight">Orders</h1>
 
       {ordersQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { ecommerceApi } from '../../lib/ecommerce-api';
 import { useAuthStore } from '../../store/auth-store';
+import { Button } from '../../components/Button';
 
 const PERKS = [
   'Approved in seconds, no impact on your credit history.',
@@ -39,7 +40,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[620px] flex-wrap">
+    <div className="flex min-h-[620px] w-full flex-1 flex-wrap items-stretch">
       <div className="flex min-w-[300px] flex-1 basis-[460px] items-center justify-center px-6 py-14">
         <div className="flex w-full max-w-[380px] flex-col gap-[22px]">
           <div className="flex flex-col gap-2">
@@ -74,13 +75,9 @@ export default function LoginPage() {
                 Incorrect email or password.
               </p>
             )}
-            <button
-              type="submit"
-              disabled={mutation.isPending}
-              className="bg-ink py-4 text-[13px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-70"
-            >
+            <Button type="submit" variant="primary" size="lg" full disabled={mutation.isPending}>
               {mutation.isPending ? '…' : 'Log in'}
-            </button>
+            </Button>
             <Link href="/register" className="py-1.5 text-left text-[13px] text-[#52525b]">
               Don&apos;t have an account? Sign up
             </Link>

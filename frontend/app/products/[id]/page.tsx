@@ -4,8 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ecommerceApi } from '../../../lib/ecommerce-api';
+import type { PaginatedProducts } from '../../../lib/ecommerce-types';
 import { formatPrice } from '../../../lib/format';
 import { useAuthStore } from '../../../store/auth-store';
+import { Button } from '../../../components/Button';
 
 const STRIPES = {
   backgroundColor: '#ffffff',
@@ -22,9 +24,27 @@ export default function ProductDetailPage() {
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [sizeMissing, setSizeMissing] = useState(false);
 
+  function backToCatalog() {
+    router.push('/');
+  }
+
   const productQuery = useQuery({
     queryKey: ['product', id],
     queryFn: () => ecommerceApi.getProduct(id),
+    staleTime: 5 * 60 * 1000,
+    // The catalog list (`GET /products`) and this detail endpoint share the
+    // exact same DTO shape (see catalog-service's `toProductDto` — both fetch
+    // `relations: { category: true, variants: true }`), so a product already
+    // sitting in a cached ['products', ...] list query is a complete, valid
+    // seed here: the page renders instantly instead of showing a loading state.
+    initialData: () => {
+      const cachedLists = queryClient.getQueriesData<PaginatedProducts>({ queryKey: ['products'] });
+      for (const [, data] of cachedLists) {
+        const match = data?.items.find((p) => p.id === id);
+        if (match) return match;
+      }
+      return undefined;
+    },
   });
 
   const addToCart = useMutation({
@@ -66,16 +86,18 @@ export default function ProductDetailPage() {
   const product = productQuery.data;
 
   return (
-    <div className="mx-auto max-w-[1280px] px-5 pb-20 pt-6">
-      <button
-        onClick={() => router.push('/')}
-        className="mb-6 font-mono text-[11px] uppercase tracking-wide text-muted"
-      >
-        ← Catalog
-      </button>
+    <div className="mx-auto w-full max-w-[1280px] px-5 pb-20 pt-6">
+      <div className="mb-6">
+        <Button variant="ghost" onClick={backToCatalog}>
+          ← Catalog
+        </Button>
+      </div>
       <div className="flex flex-wrap items-start gap-14">
         <div className="flex min-w-[300px] flex-1 basis-[420px] flex-col gap-3">
-          <div className="relative flex aspect-square items-center justify-center border border-[#f0f0f2]" style={STRIPES}>
+          <div
+            className="relative flex aspect-square items-center justify-center border border-[#f0f0f2]"
+            style={STRIPES}
+          >
             <span className="whitespace-pre-line text-center font-mono text-[10px] uppercase leading-relaxed tracking-wide text-[#b8b8be]">
               {`product shot · ${product.name.toLowerCase()}\n1:1 · white background`}
             </span>
@@ -148,15 +170,11 @@ export default function ProductDetailPage() {
             {sizeMissing && <span className="text-xs text-red-600">Pick a size to continue.</span>}
           </div>
 
-          <button
-            onClick={handleAdd}
-            disabled={addToCart.isPending}
-            className="flex items-center justify-center gap-2.5 bg-ink py-4 text-[13px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-70"
-          >
+          <Button variant="primary" size="lg" full onClick={handleAdd} disabled={addToCart.isPending}>
             {addToCart.isPending
               ? 'Adding…'
               : `Add · ${formatPrice(product.priceCents, product.currency)}`}
-          </button>
+          </Button>
 
           <ul className="m-0 flex list-none flex-col gap-2.5 border-t border-hair pt-[18px]">
             <li className="flex justify-between text-sm">

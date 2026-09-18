@@ -29,7 +29,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-[620px] flex-wrap">
+    <div className="flex min-h-[620px] w-full flex-1 flex-wrap items-stretch">
       <div className="flex min-w-[300px] flex-1 basis-[460px] items-center justify-center px-6 py-14">
         <div className="flex w-full max-w-[380px] flex-col gap-[22px]">
           <div className="flex flex-col gap-2">

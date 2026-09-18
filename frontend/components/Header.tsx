@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ecommerceApi } from '../lib/ecommerce-api';
 import { useAuthStore } from '../store/auth-store';
+import { buttonClasses } from './Button';
 
 export function Header() {
   const router = useRouter();
@@ -49,10 +50,14 @@ export function Header() {
 
       <header className="sticky top-0 z-20 border-b border-hair bg-white">
         <div className="mx-auto flex h-[68px] max-w-[1280px] items-center gap-7 px-5">
-          <Link href="/" className="flex items-baseline gap-[3px]">
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="flex items-baseline gap-[3px] border-0 bg-transparent p-0"
+          >
             <span className="text-[23px] font-extrabold italic tracking-tight">VELOCE</span>
             <span className="block h-[6px] w-[6px] bg-accent" />
-          </Link>
+          </button>
 
           <nav className="flex flex-1 gap-5 overflow-x-auto">
             {(categoriesQuery.data ?? []).map((category) => (
@@ -80,12 +85,9 @@ export function Header() {
                 </button>
               </div>
             ) : (
-              <Link
-                href="/login"
-                className="border border-ink px-3.5 py-[7px] text-xs font-semibold uppercase tracking-wide"
-              >
+              <button type="button" onClick={() => router.push('/login')} className={buttonClasses('outline', 'sm')}>
                 Log in
-              </Link>
+              </button>
             )}
             <Link
               href="/cart"

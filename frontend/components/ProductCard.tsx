@@ -6,6 +6,7 @@ import { ecommerceApi } from '../lib/ecommerce-api';
 import { formatPrice } from '../lib/format';
 import type { Product } from '../lib/ecommerce-types';
 import { useAuthStore } from '../store/auth-store';
+import { Button } from './Button';
 
 const STRIPES = {
   backgroundColor: '#ffffff',
@@ -16,6 +17,10 @@ export function ProductCard({ product }: { product: Product }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
+
+  function openProduct() {
+    router.push(`/products/${product.id}`);
+  }
 
   const addToCart = useMutation({
     mutationFn: () => {
@@ -43,10 +48,7 @@ export function ProductCard({ product }: { product: Product }) {
 
   return (
     <div className="flex animate-vrise flex-col">
-      <button
-        onClick={() => router.push(`/products/${product.id}`)}
-        className="relative block w-full border border-white bg-white p-0"
-      >
+      <button onClick={openProduct} className="relative block w-full border border-white bg-white p-0">
         <div className="flex aspect-[4/5] items-center justify-center" style={STRIPES}>
           <span className="whitespace-pre-line px-3 text-center font-mono text-[9px] uppercase leading-relaxed tracking-wide text-[#b8b8be]">
             {`product shot\n${product.name.toLowerCase()}\nwhite bg`}
@@ -62,22 +64,25 @@ export function ProductCard({ product }: { product: Product }) {
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted">
           {product.category?.name ?? ''}
         </span>
-        <button
-          onClick={() => router.push(`/products/${product.id}`)}
-          className="text-left text-[15px] font-semibold tracking-tight"
-        >
+        <button onClick={openProduct} className="text-left text-[15px] font-semibold tracking-tight">
           {product.name}
         </button>
         <div className="mt-0.5 flex items-baseline gap-2.5">
           <span className="text-[15px] font-bold">{formatPrice(product.priceCents, product.currency)}</span>
         </div>
-        <button
-          onClick={handleAddToCart}
-          disabled={addToCart.isPending}
-          className="mt-2.5 border border-ink bg-white py-2.5 text-[11px] font-semibold uppercase tracking-wide text-ink hover:bg-ink hover:text-white disabled:bg-[#f4f4f5] disabled:text-muted"
-        >
-          {addToCart.isPending ? 'Adding…' : 'Add'}
-        </button>
+        <div className="mt-2.5">
+          {/*
+            The .dc.html source sets full={true} here, but its actual rendered
+            output (verified against the live Claude Design preview) is NOT
+            full-width: the Button's dc-import host wrapper sits inside a row
+            flexbox that doesn't stretch it, so `width:100%` resolves against a
+            shrink-to-fit ancestor and the button ends up content-sized. Match
+            what's actually rendered, not the literal (and here misleading) prop.
+          */}
+          <Button variant="outline" size="xs" onClick={handleAddToCart} disabled={addToCart.isPending}>
+            {addToCart.isPending ? 'Adding…' : 'Add'}
+          </Button>
+        </div>
         {addToCart.isError && <p className="text-xs text-red-600">Couldn&apos;t add it</p>}
       </div>
     </div>

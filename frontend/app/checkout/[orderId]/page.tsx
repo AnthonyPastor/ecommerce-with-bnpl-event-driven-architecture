@@ -100,7 +100,7 @@ export default function CheckoutPage() {
   const dueToday = payMode === 'FULL' ? totalCents : plan[0];
 
   return (
-    <div className="mx-auto max-w-[1040px] px-5 pb-20 pt-10">
+    <div className="mx-auto w-full max-w-[1040px] px-5 pb-20 pt-10">
       <div className="mb-9 flex border-b border-hair">
         {STEPS.map((label, idx) => {
           const n = idx + 1;

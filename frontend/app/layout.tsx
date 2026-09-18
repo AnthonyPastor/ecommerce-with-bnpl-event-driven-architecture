@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <div className="flex min-h-screen flex-col">
             <Header />
-            <main className="flex-1">{children}</main>
+            <main className="flex min-h-0 flex-1 flex-col">{children}</main>
             <footer className="mt-auto border-t border-hair">
               <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-5 px-5 py-8">
                 <span className="text-lg font-extrabold italic tracking-tight">VELOCE</span>
