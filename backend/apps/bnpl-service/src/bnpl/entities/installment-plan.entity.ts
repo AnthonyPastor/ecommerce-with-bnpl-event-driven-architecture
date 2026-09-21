@@ -15,7 +15,7 @@ export class InstallmentPlan {
   @PrimaryColumn('uuid')
   id!: string;
 
-  @Index()
+  @Index({ unique: true })
   @Column({ name: 'order_id' })
   orderId!: string;
 
@@ -35,6 +35,19 @@ export class InstallmentPlan {
 
   @Column({ name: 'installments_count', type: 'int' })
   installmentsCount!: number;
+
+  /** Cumulative amount refunded so far, across possibly-multiple partial refunds. */
+  @Column({ name: 'refunded_amount_cents', type: 'int', default: 0 })
+  refundedAmountCents!: number;
+
+  /**
+   * `eventId` of the last `payment.transaction.partially_refunded.v1` envelope
+   * applied to this plan — guards against re-applying a redelivered/duplicate
+   * event, which `status` alone can't detect (a second *legitimate* partial
+   * refund leaves `status` at ADJUSTED too).
+   */
+  @Column({ name: 'last_refund_event_id', type: 'varchar', nullable: true })
+  lastRefundEventId!: string | null;
 
   @Column({ type: 'varchar' })
   status!: InstallmentPlanStatus;

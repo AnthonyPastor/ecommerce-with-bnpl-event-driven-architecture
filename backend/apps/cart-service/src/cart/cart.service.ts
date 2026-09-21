@@ -1,5 +1,5 @@
 import { PropagatingHttpService } from '@bnpl/observability';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { firstValueFrom } from 'rxjs';
@@ -12,6 +12,7 @@ import { Cart } from './entities/cart.entity';
 @Injectable()
 export class CartService {
   private readonly orderServiceUrl: string;
+  private readonly orderServiceTimeoutMs: number;
 
   constructor(
     @InjectRepository(Cart) private readonly carts: Repository<Cart>,
@@ -20,6 +21,7 @@ export class CartService {
     config: ConfigService,
   ) {
     this.orderServiceUrl = config.get<string>('ORDER_SERVICE_URL', 'http://localhost:3004');
+    this.orderServiceTimeoutMs = Number(config.get('ORDER_SERVICE_TIMEOUT_MS', 10000));
   }
 
   async getOrCreateActiveCart(userId: string): Promise<CartDto> {
@@ -73,29 +75,49 @@ export class CartService {
     return this.getOrCreateActiveCart(userId);
   }
 
+  /**
+   * Claims the cart atomically (`UPDATE ... WHERE status = 'ACTIVE'`) before
+   * calling order-service, instead of flipping `status` only after that call
+   * succeeds — two concurrent checkout calls for the same cart (double-click,
+   * two tabs) would otherwise both pass the empty-cart check and both create
+   * an order from the same items. Postgres serializes the two UPDATEs on the
+   * row itself, so only one can ever match `status = 'ACTIVE'`; the loser
+   * gets a 409 instead of a second order. On failure the claim is released
+   * so the cart stays retryable with its original items, same as before.
+   */
   async checkout(userId: string): Promise<unknown> {
     const cart = await this.findOrCreateActiveCartEntity(userId);
     if (cart.items.length === 0) {
       throw new BadRequestException('Cannot checkout an empty cart');
     }
 
-    const response = await firstValueFrom(
-      this.propagatingHttp.post(`${this.orderServiceUrl}/orders`, {
-        userId,
-        items: cart.items.map((item) => ({
-          productId: item.productId,
-          variantId: item.variantId,
-          name: item.name,
-          unitPriceCents: item.unitPriceCents,
-          quantity: item.quantity,
-        })),
-      }),
-    );
+    const claim = await this.carts.update({ id: cart.id, status: 'ACTIVE' }, { status: 'CHECKED_OUT' });
+    if (claim.affected === 0) {
+      throw new ConflictException(`Cart ${cart.id} was already checked out`);
+    }
 
-    cart.status = 'CHECKED_OUT';
-    await this.carts.save(cart);
-
-    return response.data;
+    try {
+      const response = await firstValueFrom(
+        this.propagatingHttp.post(
+          `${this.orderServiceUrl}/orders`,
+          {
+            userId,
+            items: cart.items.map((item) => ({
+              productId: item.productId,
+              variantId: item.variantId,
+              name: item.name,
+              unitPriceCents: item.unitPriceCents,
+              quantity: item.quantity,
+            })),
+          },
+          { timeout: this.orderServiceTimeoutMs },
+        ),
+      );
+      return response.data;
+    } catch (err) {
+      await this.carts.update({ id: cart.id }, { status: 'ACTIVE' });
+      throw err;
+    }
   }
 
   private async findOrCreateActiveCartEntity(userId: string): Promise<Cart> {

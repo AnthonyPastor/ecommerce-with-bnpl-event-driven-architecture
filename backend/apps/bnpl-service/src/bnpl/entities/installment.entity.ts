@@ -23,6 +23,10 @@ export class Installment {
   @Column({ name: 'amount_cents', type: 'int' })
   amountCents!: number;
 
+  /** `amountCents` at creation time, before any partial-refund adjustment — the base a refund factor is always applied against, so repeated adjustments don't compound. */
+  @Column({ name: 'original_amount_cents', type: 'int' })
+  originalAmountCents!: number;
+
   @Column({ name: 'due_date', type: 'timestamptz' })
   dueDate!: Date;
 

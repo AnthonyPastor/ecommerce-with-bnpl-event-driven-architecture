@@ -30,6 +30,16 @@ export class WebhookProcessorConsumer implements OnModuleInit {
     await this.rabbitConsumer.subscribe<WebhookCommandPayload>(
       RabbitMqTopology.queues.paymentsWebhookProcess,
       async (command) => {
+        const record = await this.webhookEvents.findOne({
+          where: { gateway: command.gateway, externalEventId: command.normalized.externalEventId },
+        });
+        if (record?.processedAt) {
+          this.logger.log(
+            `Webhook ${command.normalized.eventType} for transaction ${command.transactionId} already processed, ignoring redelivery`,
+          );
+          return;
+        }
+
         await this.paymentsService.processWebhookEvent(command.transactionId, command.normalized);
         await this.webhookEvents.update(
           { gateway: command.gateway, externalEventId: command.normalized.externalEventId },

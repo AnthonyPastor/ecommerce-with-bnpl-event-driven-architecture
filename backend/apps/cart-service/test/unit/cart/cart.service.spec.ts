@@ -1,6 +1,6 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { CartService } from '../../../src/cart/cart.service';
 import { Cart } from '../../../src/cart/entities/cart.entity';
 import { CartItem } from '../../../src/cart/entities/cart-item.entity';
@@ -30,6 +30,14 @@ function makeRepoMock<T extends { id?: string }>() {
       const idx = rows.findIndex((r: any) => r.id === entity.id);
       if (idx >= 0) rows.splice(idx, 1);
       return entity;
+    }),
+    update: jest.fn(async (where: any, patch: any) => {
+      const idx = rows.findIndex(
+        (r: any) => r.id === where.id && (where.status === undefined || r.status === where.status),
+      );
+      if (idx < 0) return { affected: 0 };
+      rows[idx] = { ...rows[idx], ...patch };
+      return { affected: 1 };
     }),
   };
 }
@@ -156,21 +164,64 @@ describe('CartService', () => {
 
     const result = await service.checkout('user-1');
 
-    expect(propagatingHttp.post).toHaveBeenCalledWith('http://order-service.test/orders', {
-      userId: 'user-1',
-      items: [
-        {
-          productId: 'prod-1',
-          variantId: 'var-1',
-          name: 'Widget',
-          unitPriceCents: 1000,
-          quantity: 2,
-        },
-      ],
-    });
+    expect(propagatingHttp.post).toHaveBeenCalledWith(
+      'http://order-service.test/orders',
+      {
+        userId: 'user-1',
+        items: [
+          {
+            productId: 'prod-1',
+            variantId: 'var-1',
+            name: 'Widget',
+            unitPriceCents: 1000,
+            quantity: 2,
+          },
+        ],
+      },
+      expect.objectContaining({ timeout: expect.any(Number) }),
+    );
     expect(result).toEqual({ id: 'order-1', status: 'CREATED' });
 
     const cartRow = carts.rows.find((r: any) => r.userId === 'user-1');
     expect(cartRow?.status).toBe('CHECKED_OUT');
+  });
+
+  it('rejects a concurrent checkout that lost the claim on an already-checked-out cart', async () => {
+    await service.addItem({
+      userId: 'user-1',
+      productId: 'prod-1',
+      name: 'Widget',
+      unitPriceCents: 1000,
+      quantity: 1,
+    });
+    const cartId = carts.rows.find((r: any) => r.userId === 'user-1')!.id;
+
+    // Simulate this request having read the cart while it was still ACTIVE,
+    // right before a concurrent request wins the claim first.
+    const staleSnapshot = {
+      ...carts.rows.find((r: any) => r.id === cartId),
+      items: cartItems.rows.filter((i: any) => i.cartId === cartId),
+    };
+    (carts as any).findOne = jest.fn(async () => staleSnapshot);
+    await carts.update({ id: cartId, status: 'ACTIVE' }, { status: 'CHECKED_OUT' }); // the winning concurrent request
+
+    await expect(service.checkout('user-1')).rejects.toThrow(ConflictException);
+    expect(propagatingHttp.post).not.toHaveBeenCalled();
+  });
+
+  it('releases the claim back to ACTIVE when the call to order-service fails', async () => {
+    await service.addItem({
+      userId: 'user-1',
+      productId: 'prod-1',
+      name: 'Widget',
+      unitPriceCents: 1000,
+      quantity: 1,
+    });
+    propagatingHttp.post.mockReturnValue(throwError(() => new Error('order-service unreachable')));
+
+    await expect(service.checkout('user-1')).rejects.toThrow('order-service unreachable');
+
+    const cartRow = carts.rows.find((r: any) => r.userId === 'user-1');
+    expect(cartRow?.status).toBe('ACTIVE');
   });
 });

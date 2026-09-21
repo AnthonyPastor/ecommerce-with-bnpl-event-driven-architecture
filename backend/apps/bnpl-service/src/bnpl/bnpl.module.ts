@@ -2,12 +2,17 @@ import { OutboxModule } from '@bnpl/outbox';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BnplController } from './bnpl.controller';
-import { BnplService } from './bnpl.service';
 import { CreditScoringService } from './credit-scoring.service';
 import { CreditProfile } from './entities/credit-profile.entity';
 import { Installment } from './entities/installment.entity';
 import { InstallmentPlan } from './entities/installment-plan.entity';
 import { PaymentEventsConsumer } from './payment-events.consumer';
+import { ActivateInstallmentPlanUseCase } from './use-cases/activate-installment-plan.use-case';
+import { AdjustInstallmentPlanUseCase } from './use-cases/adjust-installment-plan.use-case';
+import { CancelInstallmentPlanUseCase } from './use-cases/cancel-installment-plan.use-case';
+import { GetInstallmentPlanUseCase } from './use-cases/get-installment-plan.use-case';
+import { HoldInstallmentPlanUseCase } from './use-cases/hold-installment-plan.use-case';
+import { ListInstallmentPlansUseCase } from './use-cases/list-installment-plans.use-case';
 
 @Module({
   imports: [
@@ -15,6 +20,15 @@ import { PaymentEventsConsumer } from './payment-events.consumer';
     OutboxModule.forFeature({ producerName: 'bnpl-service' }),
   ],
   controllers: [BnplController],
-  providers: [BnplService, CreditScoringService, PaymentEventsConsumer],
+  providers: [
+    CreditScoringService,
+    PaymentEventsConsumer,
+    ActivateInstallmentPlanUseCase,
+    CancelInstallmentPlanUseCase,
+    AdjustInstallmentPlanUseCase,
+    HoldInstallmentPlanUseCase,
+    GetInstallmentPlanUseCase,
+    ListInstallmentPlansUseCase,
+  ],
 })
 export class BnplModule {}
