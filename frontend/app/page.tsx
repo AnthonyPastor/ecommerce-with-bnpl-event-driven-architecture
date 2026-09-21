@@ -3,9 +3,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
-import { ProductCard } from '../components/ProductCard';
-import { Button } from '../components/Button';
-import { ecommerceApi } from '../lib/ecommerce-api';
+import { ProductCard } from '@components/ProductCard';
+import { Button } from '@components/Button';
+import { ecommerceApi } from '@lib/ecommerce-api';
 
 type SortKey = 'featured' | 'priceAsc' | 'priceDesc';
 

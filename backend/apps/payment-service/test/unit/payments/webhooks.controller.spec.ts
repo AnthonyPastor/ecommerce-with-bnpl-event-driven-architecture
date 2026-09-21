@@ -74,4 +74,21 @@ describe('WebhooksController.receiveWebhook', () => {
       expect.objectContaining({ gateway: 'fake', transactionId: 'txn-1' }),
     );
   });
+
+  it('gracefully acknowledges a truly concurrent duplicate that races past the findOne check', async () => {
+    const { controller, webhookEvents, rabbitPublisher } = makeController();
+    webhookEvents.save.mockRejectedValue({ driverError: { code: '23505' } });
+
+    const result = await controller.receiveWebhook('fake', { some: 'body' }, {});
+
+    expect(result).toEqual({ received: true, duplicate: true });
+    expect(rabbitPublisher.publish).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a save failure that is not a unique-violation', async () => {
+    const { controller, webhookEvents } = makeController();
+    webhookEvents.save.mockRejectedValue(new Error('connection reset'));
+
+    await expect(controller.receiveWebhook('fake', { some: 'body' }, {})).rejects.toThrow('connection reset');
+  });
 });

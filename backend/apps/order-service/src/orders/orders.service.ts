@@ -57,6 +57,13 @@ export class OrdersService {
    * nothing is. The business `transactionId` is born here (= order.id) and
    * travels in the event so that everything reacting to this order
    * (payment-service, bnpl-service) shares the same id end to end.
+   *
+   * When `dto.idempotencyKey` is given, a retry (e.g. cart-service re-sending
+   * after a client-side timeout whose response it never saw) returns the
+   * already-created order instead of creating a duplicate. Guarded by a
+   * Postgres advisory lock keyed on `idempotencyKey`, same pattern as
+   * `PaymentsService.createPayment()` — a plain row lock can't help on the
+   * very first call, since there's no row yet to lock.
    */
   async createOrder(dto: CreateOrderDto): Promise<Order> {
     const totalCents = dto.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
@@ -66,6 +73,19 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
+      if (dto.idempotencyKey) {
+        await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [dto.idempotencyKey]);
+        const existing = await queryRunner.manager.findOne(Order, {
+          where: { idempotencyKey: dto.idempotencyKey },
+          relations: ['items'],
+        });
+        if (existing) {
+          await queryRunner.commitTransaction();
+          this.requestContext.setTransactionId(existing.id);
+          return existing;
+        }
+      }
+
       // We generate the id ourselves (instead of letting Postgres' DEFAULT
       // assign it) because we need it BEFORE the save to use it as the
       // aggregateId/transactionId of the outbox event in the same call.
@@ -75,6 +95,7 @@ export class OrdersService {
         status: OrderStatus.CREATED,
         totalCents,
         currency: 'USD',
+        idempotencyKey: dto.idempotencyKey ?? null,
         items: dto.items.map((item) =>
           queryRunner.manager.create(OrderItem, {
             productId: item.productId,

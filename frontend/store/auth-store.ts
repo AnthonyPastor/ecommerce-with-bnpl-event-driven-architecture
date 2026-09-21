@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthTokens, AuthUser } from '../lib/ecommerce-types';
+import type { AuthTokens, AuthUser } from '@lib/ecommerce-types';
 
 interface AuthState {
   accessToken: string | null;

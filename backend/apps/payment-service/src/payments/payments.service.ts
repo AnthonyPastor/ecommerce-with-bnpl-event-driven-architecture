@@ -3,29 +3,34 @@ import { KafkaTopics, PaymentMethod } from '@bnpl/event-contracts';
 import { RequestContextService } from '@bnpl/observability';
 import { saveWithOutbox } from '@bnpl/outbox';
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { TransactionStatusHistory } from './entities/transaction-status-history.entity';
 import { Transaction } from './entities/transaction.entity';
-import { NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
+import { AuthorizeResult, NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
 import { PaymentStatus, assertTransition, isTerminalPaymentStatus } from './payment-state-machine';
+import { withTimeout } from './with-timeout';
 
 interface TransactionPatch {
   gatewayReference?: string;
-  refundedAmountCents?: number;
 }
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+  private readonly gatewayTimeoutMs: number;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Transaction) private readonly transactions: Repository<Transaction>,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGatewayPort,
     private readonly requestContext: RequestContextService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.gatewayTimeoutMs = Number(config.get('PAYMENT_GATEWAY_TIMEOUT_MS', 10000));
+  }
 
   /**
    * Creates the Transaction (PENDING) and triggers a sync `authorize` against the gateway.
@@ -78,13 +83,18 @@ export class PaymentsService {
     }
 
     const { id, currency } = pending;
+    // Kept separate from the timed race below: `withTimeout` rejecting on a
+    // timeout doesn't cancel the underlying gateway call, so this promise can
+    // still resolve AUTHORIZED after we've already committed
+    // AUTHORIZATION_FAILED (terminal — nothing else transitions out of it).
+    const authorizePromise = this.gateway.authorize({ transactionId: id, amountCents: dto.amountCents, currency });
 
     try {
-      const result = await this.gateway.authorize({
-        transactionId: id,
-        amountCents: dto.amountCents,
-        currency,
-      });
+      const result = await withTimeout(
+        authorizePromise,
+        this.gatewayTimeoutMs,
+        `Gateway authorize timed out after ${this.gatewayTimeoutMs}ms`,
+      );
 
       return await this.applyTransition(
         id,
@@ -102,8 +112,36 @@ export class PaymentsService {
         KafkaTopics.payment.authorizationFailed,
         { transactionId: id, orderId: dto.orderId, userId: dto.userId, reason: (err as Error).message },
       );
+      this.reconcileLateAuthorization(id, authorizePromise);
       throw err;
     }
+  }
+
+  /**
+   * Best-effort reconciliation for a gateway authorize call that resolves
+   * AFTER we've already committed AUTHORIZATION_FAILED (e.g. it only timed
+   * out on our side, per the comment in `createPayment()`). We can't
+   * transition out of that terminal status, so instead of leaving the
+   * gateway's funds hold dangling with no corresponding payment, void it —
+   * and log loudly, since this indicates a real discrepancy worth
+   * investigating, not a routine path.
+   */
+  private reconcileLateAuthorization(transactionId: string, authorizePromise: Promise<AuthorizeResult>): void {
+    authorizePromise.then(
+      (result) => {
+        this.logger.warn(
+          `Gateway authorize for transaction ${transactionId} succeeded after it had already been marked AUTHORIZATION_FAILED; voiding the late hold (gatewayReference=${result.gatewayReference})`,
+        );
+        return this.gateway.void({ transactionId, gatewayReference: result.gatewayReference }).catch((voidErr) => {
+          this.logger.error(
+            `Failed to void late authorization for transaction ${transactionId}: ${(voidErr as Error).message}`,
+          );
+        });
+      },
+      () => {
+        // Genuinely failed/rejected too (not just a timeout) — nothing to reconcile.
+      },
+    );
   }
 
   /**
@@ -217,29 +255,9 @@ export class PaymentsService {
         );
         return;
 
-      case 'refund_succeeded': {
-        const refundedNow = event.amountCents ?? transaction.amountCents - transaction.refundedAmountCents;
-        const newRefundedTotal = transaction.refundedAmountCents + refundedNow;
-        const isFullRefund = newRefundedTotal >= transaction.amountCents;
-        const to = isFullRefund ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
-        const topic = isFullRefund ? KafkaTopics.payment.refunded : KafkaTopics.payment.partiallyRefunded;
-
-        await this.applyTransition(
-          transaction.id,
-          to,
-          'webhook',
-          topic,
-          {
-            transactionId: transaction.id,
-            orderId: transaction.orderId,
-            userId: transaction.userId,
-            amountCents: refundedNow,
-            currency: transaction.currency,
-          },
-          { refundedAmountCents: newRefundedTotal },
-        );
+      case 'refund_succeeded':
+        await this.applyRefund(transaction.id, event.amountCents, 'webhook');
         return;
-      }
 
       default:
         this.logger.warn(`No transition mapped for webhook event type "${event.eventType}", ignoring`);
@@ -287,15 +305,13 @@ export class PaymentsService {
     try {
       const transaction = await queryRunner.manager.findOneOrFail(Transaction, {
         where: { id: transactionId },
+        lock: { mode: 'pessimistic_write' },
       });
       assertTransition(transaction.status, to);
       const fromStatus = transaction.status;
       transaction.status = to;
       if (patch?.gatewayReference) {
         transaction.gatewayReference = patch.gatewayReference;
-      }
-      if (patch?.refundedAmountCents !== undefined) {
-        transaction.refundedAmountCents = patch.refundedAmountCents;
       }
 
       this.requestContext.setTransactionId(transaction.orderId);
@@ -308,6 +324,80 @@ export class PaymentsService {
         correlationId,
         transactionId: transaction.orderId,
         payload,
+      });
+
+      const history = queryRunner.manager.create(TransactionStatusHistory, {
+        transaction: saved,
+        fromStatus,
+        toStatus: to,
+        source,
+      });
+      await queryRunner.manager.save(history);
+
+      await queryRunner.commitTransaction();
+      return saved;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Applies a (possibly partial) refund. Unlike `applyTransition()`, the
+   * target status here depends on state that can itself be racing (the
+   * transaction's already-refunded total) — so the read, the decision
+   * (REFUNDED vs PARTIALLY_REFUNDED) and the write all happen inside the
+   * SAME locked transaction, instead of deciding from an earlier unlocked
+   * read like `processWebhookEvent()` used to. That's what actually closes
+   * the lost-update race for two concurrent/duplicate refund webhooks —
+   * locking `applyTransition()`'s read alone wouldn't have been enough,
+   * since the value being written would still have been computed upstream
+   * from stale data.
+   */
+  private async applyRefund(
+    transactionId: string,
+    explicitAmountCents: number | undefined,
+    source: 'sync' | 'webhook',
+  ): Promise<Transaction> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const transaction = await queryRunner.manager.findOneOrFail(Transaction, {
+        where: { id: transactionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      const refundedNow = explicitAmountCents ?? transaction.amountCents - transaction.refundedAmountCents;
+      const newRefundedTotal = transaction.refundedAmountCents + refundedNow;
+      const isFullRefund = newRefundedTotal >= transaction.amountCents;
+      const to = isFullRefund ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
+      const eventType = isFullRefund ? KafkaTopics.payment.refunded : KafkaTopics.payment.partiallyRefunded;
+
+      assertTransition(transaction.status, to);
+      const fromStatus = transaction.status;
+      transaction.status = to;
+      transaction.refundedAmountCents = newRefundedTotal;
+
+      this.requestContext.setTransactionId(transaction.orderId);
+      const correlationId = this.requestContext.getCorrelationId() ?? 'unknown';
+
+      const saved = await saveWithOutbox(queryRunner, transaction, {
+        eventType,
+        aggregateType: 'Transaction',
+        aggregateId: transaction.id,
+        correlationId,
+        transactionId: transaction.orderId,
+        payload: {
+          transactionId: transaction.id,
+          orderId: transaction.orderId,
+          userId: transaction.userId,
+          amountCents: refundedNow,
+          currency: transaction.currency,
+        },
       });
 
       const history = queryRunner.manager.create(TransactionStatusHistory, {

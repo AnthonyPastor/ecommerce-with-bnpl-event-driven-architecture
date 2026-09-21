@@ -76,16 +76,26 @@ export class WebhooksController {
       throw new NotFoundException(`No transaction found for gatewayReference ${normalized.gatewayReference}`);
     }
 
-    await this.webhookEvents.save(
-      this.webhookEvents.create({
-        gateway: gatewayName,
-        externalEventId: normalized.externalEventId,
-        transactionId: transaction.id,
-        eventType: normalized.eventType,
-        rawPayload: body,
-        processedAt: null,
-      }),
-    );
+    try {
+      await this.webhookEvents.save(
+        this.webhookEvents.create({
+          gateway: gatewayName,
+          externalEventId: normalized.externalEventId,
+          transactionId: transaction.id,
+          eventType: normalized.eventType,
+          rawPayload: body,
+          processedAt: null,
+        }),
+      );
+    } catch (err) {
+      const code = (err as { code?: string; driverError?: { code?: string } })?.driverError?.code ?? (err as { code?: string })?.code;
+      if (code === '23505') {
+        // Lost the race against a truly concurrent identical delivery — the other one already inserted the row.
+        this.logger.log(`Duplicate webhook delivery ignored (race): ${normalized.externalEventId}`);
+        return { received: true, duplicate: true };
+      }
+      throw err;
+    }
 
     const command: WebhookCommandPayload = { gateway: gatewayName, transactionId: transaction.id, normalized };
     this.rabbitPublisher.publish(

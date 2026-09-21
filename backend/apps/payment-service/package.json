@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && tsc-alias -p tsconfig.build.json",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "concurrently \"nest start --watch\" \"tsc-alias -w -p tsconfig.build.json\"",
     "start:prod": "node dist/main",
     "test": "jest",
     "test:e2e": "jest --config ./test/e2e/jest-e2e.json"
@@ -40,6 +40,8 @@
     "kafkajs": "^2.2.4",
     "@types/amqplib": "^0.10.5",
     "supertest": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "tsc-alias": "^1.8.10",
     "ts-jest": "^29.2.5",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
@@ -51,6 +53,7 @@
     "rootDir": "test/unit",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+    "moduleNameMapper": { "^@payment/(.*)$": "<rootDir>/../../src/$1" },
     "testEnvironment": "node"
   }
 }

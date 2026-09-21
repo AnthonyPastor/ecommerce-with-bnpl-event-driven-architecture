@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Archivo, IBM_Plex_Mono } from 'next/font/google';
-import { Header } from '../components/Header';
+import { Header } from '@components/Header';
 import './globals.css';
 import { Providers } from './providers';
 

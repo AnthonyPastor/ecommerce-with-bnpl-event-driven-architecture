@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
-import { ecommerceApi } from '../../lib/ecommerce-api';
+import { ecommerceApi } from '@lib/ecommerce-api';
 
 const PERKS = [
   'Approved in seconds, no impact on your credit history.',

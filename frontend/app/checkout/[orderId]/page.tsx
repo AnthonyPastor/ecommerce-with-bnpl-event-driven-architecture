@@ -3,11 +3,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { bnplApi } from '../../../lib/bnpl-api';
-import { ecommerceApi } from '../../../lib/ecommerce-api';
-import { formatPrice } from '../../../lib/format';
-import { NON_BLOCKING_PAYMENT_STATUSES, type PaymentMethod } from '../../../lib/bnpl-types';
-import { useRequireAuth } from '../../../lib/use-require-auth';
+import { bnplApi } from '@lib/bnpl-api';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { formatPrice } from '@lib/format';
+import { NON_BLOCKING_PAYMENT_STATUSES, type PaymentMethod } from '@lib/bnpl-types';
+import { useRequireAuth } from '@lib/use-require-auth';
 
 const STEPS = ['Shipping', 'Plan', 'Review'];
 

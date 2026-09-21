@@ -1,8 +1,8 @@
 import { All, Controller, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
-import { Public } from '../common/public.decorator';
-import { ProxyService } from '../proxy/proxy.service';
+import { Public } from '@gateway/common/public.decorator';
+import { ProxyService } from '@gateway/proxy/proxy.service';
 
 /** auth-service keeps its own /auth/... prefix, so strip only /api. Register/login/refresh are public; everything else needs a JWT. */
 @Controller('auth')

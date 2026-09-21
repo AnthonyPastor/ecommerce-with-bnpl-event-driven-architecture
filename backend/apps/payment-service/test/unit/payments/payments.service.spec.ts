@@ -50,11 +50,14 @@ function makeService(txnState: Partial<Transaction>, existingForOrder: Partial<T
     parseWebhookPayload: jest.fn(),
   };
 
+  const config = { get: jest.fn((_key: string, fallback?: unknown) => fallback) };
+
   const service = new PaymentsService(
     dataSource as any,
     transactionsRepo as any,
     gateway as any,
     requestContext as any,
+    config as any,
   );
   return { service, queryRunner, transactionsRepo, requestContext, gateway, getCurrent };
 }
@@ -143,6 +146,68 @@ describe('PaymentsService.createPayment', () => {
 
     expect(result.status).toBe(PaymentStatus.AUTHORIZED);
   });
+
+  it('transitions to AUTHORIZATION_FAILED instead of hanging forever when the gateway never responds', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, gateway, getCurrent } = makeService({
+        id: 'txn-1',
+        status: PaymentStatus.PENDING,
+        orderId: 'order-1',
+      });
+      gateway.authorize.mockImplementation(() => new Promise(() => {})); // never settles
+
+      const result = service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
+      const assertion = expect(result).rejects.toThrow(/timed out/);
+      await jest.advanceTimersByTimeAsync(10000);
+      await assertion;
+
+      expect(getCurrent().status).toBe(PaymentStatus.AUTHORIZATION_FAILED);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('voids a late authorization that succeeds after the timeout already failed it', async () => {
+    jest.useFakeTimers();
+    try {
+      let resolveAuthorize!: (value: { gatewayReference: string }) => void;
+      const { service, gateway, getCurrent } = makeService({
+        id: 'txn-1',
+        status: PaymentStatus.PENDING,
+        orderId: 'order-1',
+      });
+      gateway.authorize.mockImplementation(
+        () =>
+          new Promise<{ gatewayReference: string }>((resolve) => {
+            resolveAuthorize = resolve;
+          }),
+      );
+      gateway.void.mockResolvedValue({ gatewayReference: 'void-ref' });
+
+      const result = service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
+      const assertion = expect(result).rejects.toThrow(/timed out/);
+      await jest.advanceTimersByTimeAsync(10000);
+      await assertion;
+      expect(getCurrent().status).toBe(PaymentStatus.AUTHORIZATION_FAILED);
+
+      // `createPayment()` generates the transaction id itself (randomUUID()),
+      // not the fixture's 'txn-1' — recover the real one from the authorize call.
+      const generatedTransactionId = (gateway.authorize.mock.calls as any[])[0][0].transactionId as string;
+
+      // The gateway call was never actually cancelled — it succeeds after we'd
+      // already given up and committed AUTHORIZATION_FAILED (terminal).
+      resolveAuthorize({ gatewayReference: 'fake_txn-1' });
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(gateway.void).toHaveBeenCalledWith({
+        transactionId: generatedTransactionId,
+        gatewayReference: 'fake_txn-1',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('PaymentsService.findByOrderId', () => {
@@ -211,6 +276,29 @@ describe('PaymentsService.processWebhookEvent', () => {
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
+
+  it('takes a pessimistic row lock before mutating, to close the lost-update race with a concurrent writer', async () => {
+    const { service, queryRunner } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.AUTHORIZED,
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 1000,
+      currency: 'USD',
+    });
+
+    await service.processWebhookEvent('txn-1', {
+      externalEventId: 'evt-1',
+      gatewayReference: 'fake_txn-1',
+      eventType: 'capture_succeeded',
+      amountCents: 1000,
+    });
+
+    expect(queryRunner.manager.findOneOrFail).toHaveBeenCalledWith(
+      Transaction,
+      expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+    );
+  });
 });
 
 describe('PaymentsService.findById', () => {
@@ -264,6 +352,36 @@ describe('PaymentsService partial refunds via processWebhookEvent', () => {
 
     expect(getCurrent().status).toBe(PaymentStatus.REFUNDED);
     expect(getCurrent().refundedAmountCents).toBe(1000);
+  });
+
+  it('a second refund_succeeded call accumulates on top of the first, not from a stale snapshot', async () => {
+    const { service, getCurrent } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.CAPTURED,
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 1000,
+      refundedAmountCents: 0,
+      currency: 'USD',
+    });
+
+    await service.processWebhookEvent('txn-1', {
+      externalEventId: 'evt-1',
+      gatewayReference: 'fake_txn-1',
+      eventType: 'refund_succeeded',
+      amountCents: 300,
+    });
+    expect(getCurrent().refundedAmountCents).toBe(300);
+    expect(getCurrent().status).toBe(PaymentStatus.PARTIALLY_REFUNDED);
+
+    await service.processWebhookEvent('txn-1', {
+      externalEventId: 'evt-2',
+      gatewayReference: 'fake_txn-1',
+      eventType: 'refund_succeeded',
+      amountCents: 300,
+    });
+    expect(getCurrent().refundedAmountCents).toBe(600);
+    expect(getCurrent().status).toBe(PaymentStatus.PARTIALLY_REFUNDED);
   });
 });
 

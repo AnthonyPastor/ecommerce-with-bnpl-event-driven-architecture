@@ -1,6 +1,6 @@
 import { ECOMMERCE_BASE_URL } from './config';
 import type { AuthTokens } from './ecommerce-types';
-import { useAuthStore } from '../store/auth-store';
+import { useAuthStore } from '@store/auth-store';
 
 interface RequestOptions {
   method?: string;

@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && tsc-alias -p tsconfig.build.json",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "concurrently \"nest start --watch\" \"tsc-alias -w -p tsconfig.build.json\"",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "jest",
@@ -40,6 +40,8 @@
     "jest": "^29.7.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "tsc-alias": "^1.8.10",
     "ts-jest": "^29.2.5",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
@@ -51,6 +53,7 @@
     "rootDir": "test/unit",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+    "moduleNameMapper": { "^@auth/(.*)$": "<rootDir>/../../src/$1" },
     "collectCoverageFrom": ["../../src/**/*.(t|j)s"],
     "coverageDirectory": "../../coverage",
     "testEnvironment": "node"

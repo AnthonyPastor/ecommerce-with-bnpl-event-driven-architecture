@@ -3,8 +3,8 @@
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ecommerceApi } from '../lib/ecommerce-api';
-import { useAuthStore } from '../store/auth-store';
+import { ecommerceApi } from '@lib/ecommerce-api';
+import { useAuthStore } from '@store/auth-store';
 import { buttonClasses } from './Button';
 
 export function Header() {
