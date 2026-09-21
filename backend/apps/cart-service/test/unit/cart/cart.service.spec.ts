@@ -151,7 +151,7 @@ describe('CartService', () => {
   });
 
   it('checkout posts to order-service and marks the cart CHECKED_OUT', async () => {
-    await service.addItem({
+    const cartDto = await service.addItem({
       userId: 'user-1',
       productId: 'prod-1',
       variantId: 'var-1',
@@ -168,6 +168,7 @@ describe('CartService', () => {
       'http://order-service.test/orders',
       {
         userId: 'user-1',
+        idempotencyKey: cartDto.id,
         items: [
           {
             productId: 'prod-1',

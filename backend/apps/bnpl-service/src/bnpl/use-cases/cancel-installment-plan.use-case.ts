@@ -4,6 +4,7 @@ import { saveWithOutbox } from '@bnpl/outbox';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { Installment } from '../entities/installment.entity';
 import { InstallmentPlan } from '../entities/installment-plan.entity';
 import { PaymentEventPayload } from './payment-event-payload';
 import { UseCase } from './use-case.interface';
@@ -34,7 +35,6 @@ export class CancelInstallmentPlanUseCase implements UseCase<PaymentEventPayload
     try {
       const plan = await queryRunner.manager.findOne(InstallmentPlan, {
         where: { orderId: payload.orderId },
-        relations: ['installments'],
         lock: { mode: 'pessimistic_write' },
       });
       if (!plan) {
@@ -48,7 +48,11 @@ export class CancelInstallmentPlanUseCase implements UseCase<PaymentEventPayload
         return;
       }
 
-      for (const installment of plan.installments) {
+      const installments = await queryRunner.manager.find(Installment, {
+        where: { plan: { id: plan.id } },
+      });
+
+      for (const installment of installments) {
         if (installment.status === InstallmentStatus.PENDING || installment.status === InstallmentStatus.DUE) {
           installment.status = InstallmentStatus.CANCELLED;
           await queryRunner.manager.save(installment);

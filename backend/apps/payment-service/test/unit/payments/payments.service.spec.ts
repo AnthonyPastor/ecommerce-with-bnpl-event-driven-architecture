@@ -167,6 +167,47 @@ describe('PaymentsService.createPayment', () => {
       jest.useRealTimers();
     }
   });
+
+  it('voids a late authorization that succeeds after the timeout already failed it', async () => {
+    jest.useFakeTimers();
+    try {
+      let resolveAuthorize!: (value: { gatewayReference: string }) => void;
+      const { service, gateway, getCurrent } = makeService({
+        id: 'txn-1',
+        status: PaymentStatus.PENDING,
+        orderId: 'order-1',
+      });
+      gateway.authorize.mockImplementation(
+        () =>
+          new Promise<{ gatewayReference: string }>((resolve) => {
+            resolveAuthorize = resolve;
+          }),
+      );
+      gateway.void.mockResolvedValue({ gatewayReference: 'void-ref' });
+
+      const result = service.createPayment({ orderId: 'order-1', userId: 'user-1', amountCents: 1000 });
+      const assertion = expect(result).rejects.toThrow(/timed out/);
+      await jest.advanceTimersByTimeAsync(10000);
+      await assertion;
+      expect(getCurrent().status).toBe(PaymentStatus.AUTHORIZATION_FAILED);
+
+      // `createPayment()` generates the transaction id itself (randomUUID()),
+      // not the fixture's 'txn-1' — recover the real one from the authorize call.
+      const generatedTransactionId = (gateway.authorize.mock.calls as any[])[0][0].transactionId as string;
+
+      // The gateway call was never actually cancelled — it succeeds after we'd
+      // already given up and committed AUTHORIZATION_FAILED (terminal).
+      resolveAuthorize({ gatewayReference: 'fake_txn-1' });
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(gateway.void).toHaveBeenCalledWith({
+        transactionId: generatedTransactionId,
+        gatewayReference: 'fake_txn-1',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('PaymentsService.findByOrderId', () => {

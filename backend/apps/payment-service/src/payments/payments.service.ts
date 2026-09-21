@@ -9,7 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { TransactionStatusHistory } from './entities/transaction-status-history.entity';
 import { Transaction } from './entities/transaction.entity';
-import { NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
+import { AuthorizeResult, NormalizedWebhookEvent, PAYMENT_GATEWAY, PaymentGatewayPort } from './ports/payment-gateway.port';
 import { PaymentStatus, assertTransition, isTerminalPaymentStatus } from './payment-state-machine';
 import { withTimeout } from './with-timeout';
 
@@ -83,10 +83,15 @@ export class PaymentsService {
     }
 
     const { id, currency } = pending;
+    // Kept separate from the timed race below: `withTimeout` rejecting on a
+    // timeout doesn't cancel the underlying gateway call, so this promise can
+    // still resolve AUTHORIZED after we've already committed
+    // AUTHORIZATION_FAILED (terminal — nothing else transitions out of it).
+    const authorizePromise = this.gateway.authorize({ transactionId: id, amountCents: dto.amountCents, currency });
 
     try {
       const result = await withTimeout(
-        this.gateway.authorize({ transactionId: id, amountCents: dto.amountCents, currency }),
+        authorizePromise,
         this.gatewayTimeoutMs,
         `Gateway authorize timed out after ${this.gatewayTimeoutMs}ms`,
       );
@@ -107,8 +112,36 @@ export class PaymentsService {
         KafkaTopics.payment.authorizationFailed,
         { transactionId: id, orderId: dto.orderId, userId: dto.userId, reason: (err as Error).message },
       );
+      this.reconcileLateAuthorization(id, authorizePromise);
       throw err;
     }
+  }
+
+  /**
+   * Best-effort reconciliation for a gateway authorize call that resolves
+   * AFTER we've already committed AUTHORIZATION_FAILED (e.g. it only timed
+   * out on our side, per the comment in `createPayment()`). We can't
+   * transition out of that terminal status, so instead of leaving the
+   * gateway's funds hold dangling with no corresponding payment, void it —
+   * and log loudly, since this indicates a real discrepancy worth
+   * investigating, not a routine path.
+   */
+  private reconcileLateAuthorization(transactionId: string, authorizePromise: Promise<AuthorizeResult>): void {
+    authorizePromise.then(
+      (result) => {
+        this.logger.warn(
+          `Gateway authorize for transaction ${transactionId} succeeded after it had already been marked AUTHORIZATION_FAILED; voiding the late hold (gatewayReference=${result.gatewayReference})`,
+        );
+        return this.gateway.void({ transactionId, gatewayReference: result.gatewayReference }).catch((voidErr) => {
+          this.logger.error(
+            `Failed to void late authorization for transaction ${transactionId}: ${(voidErr as Error).message}`,
+          );
+        });
+      },
+      () => {
+        // Genuinely failed/rejected too (not just a timeout) — nothing to reconcile.
+      },
+    );
   }
 
   /**

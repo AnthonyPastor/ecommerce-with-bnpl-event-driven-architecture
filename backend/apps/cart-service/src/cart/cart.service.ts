@@ -84,6 +84,14 @@ export class CartService {
    * row itself, so only one can ever match `status = 'ACTIVE'`; the loser
    * gets a 409 instead of a second order. On failure the claim is released
    * so the cart stays retryable with its original items, same as before.
+   *
+   * The order-service call sends `cart.id` as `idempotencyKey`: a failure
+   * here (in particular a client-side timeout) doesn't tell us whether
+   * order-service actually finished creating the order before we gave up
+   * waiting, so a naive revert-and-retry could create a second order for the
+   * same items. Because a retried checkout reclaims this same cart id, the
+   * idempotency key is stable across retries and order-service returns the
+   * original order instead of duplicating it.
    */
   async checkout(userId: string): Promise<unknown> {
     const cart = await this.findOrCreateActiveCartEntity(userId);
@@ -102,6 +110,7 @@ export class CartService {
           `${this.orderServiceUrl}/orders`,
           {
             userId,
+            idempotencyKey: cart.id,
             items: cart.items.map((item) => ({
               productId: item.productId,
               variantId: item.variantId,

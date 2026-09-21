@@ -3,7 +3,7 @@ import { CreateOrderDto } from '../../../src/orders/dto/create-order.dto';
 import { Order } from '../../../src/orders/entities/order.entity';
 import { OrdersService } from '../../../src/orders/orders.service';
 
-function makeFakeQueryRunner(seed?: Record<string, unknown>) {
+function makeFakeQueryRunner(seed?: Record<string, unknown>, existingByIdempotencyKey?: Record<string, unknown> | null) {
   const savedEntities: unknown[] = [];
   let current: any = seed ? { ...seed } : undefined;
   const manager = {
@@ -17,9 +17,11 @@ function makeFakeQueryRunner(seed?: Record<string, unknown>) {
       if (!current) throw new Error('not found');
       return current;
     }),
+    findOne: jest.fn(async () => existingByIdempotencyKey ?? null),
   };
   const queryRunner = {
     manager,
+    query: jest.fn(async () => undefined),
     connect: jest.fn(async () => undefined),
     startTransaction: jest.fn(async () => undefined),
     commitTransaction: jest.fn(async () => undefined),
@@ -32,10 +34,11 @@ function makeFakeQueryRunner(seed?: Record<string, unknown>) {
 function makeService(overrides?: {
   queryRunner?: ReturnType<typeof makeFakeQueryRunner>['queryRunner'];
   seed?: Record<string, unknown>;
+  existingByIdempotencyKey?: Record<string, unknown> | null;
 }) {
   const { queryRunner, savedEntities } = overrides?.queryRunner
     ? { queryRunner: overrides.queryRunner, savedEntities: [] as unknown[] }
-    : makeFakeQueryRunner(overrides?.seed);
+    : makeFakeQueryRunner(overrides?.seed, overrides?.existingByIdempotencyKey);
 
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
   const ordersRepo = { findOne: jest.fn(), find: jest.fn() };
@@ -100,6 +103,28 @@ describe('OrdersService.createOrder', () => {
     expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
     expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
     expect(queryRunner.release).toHaveBeenCalled();
+  });
+
+  it('returns the already-created order instead of creating a duplicate when idempotencyKey matches one', async () => {
+    const existing = { id: 'order-existing', idempotencyKey: 'cart-1', totalCents: 2500 };
+    const { queryRunner } = makeFakeQueryRunner(undefined, existing);
+    const { service } = makeService({ queryRunner });
+
+    const result = await service.createOrder({ ...dto, idempotencyKey: 'cart-1' });
+
+    expect(result).toBe(existing);
+    expect(queryRunner.manager.save).not.toHaveBeenCalled();
+    expect(queryRunner.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('creates a new order and persists idempotencyKey when no existing order matches it', async () => {
+    const { service, queryRunner } = makeService({ existingByIdempotencyKey: null });
+
+    const result = await service.createOrder({ ...dto, idempotencyKey: 'cart-2' });
+
+    expect(result.idempotencyKey).toBe('cart-2');
+    expect(queryRunner.manager.save).toHaveBeenCalled();
+    expect(queryRunner.commitTransaction).toHaveBeenCalled();
   });
 });
 

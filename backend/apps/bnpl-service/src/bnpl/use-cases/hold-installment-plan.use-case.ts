@@ -15,6 +15,13 @@ import { UseCase } from './use-case.interface';
  *
  * Idempotent the same way as `CancelInstallmentPlanUseCase`: a pessimistic
  * row lock plus an early-return once the plan is already on hold.
+ *
+ * Both side effects (plan status, credit profile flag) run inside the SAME
+ * transaction/queryRunner — doing the credit-profile update after commit
+ * would let it get silently skipped forever: a crash between commit and that
+ * call, or the call itself failing, leaves the plan already at
+ * DISPUTED_HOLD, so a Kafka redelivery of this event hits the early-return
+ * above before ever retrying it.
  */
 @Injectable()
 export class HoldInstallmentPlanUseCase implements UseCase<PaymentEventPayload, void> {
@@ -49,6 +56,8 @@ export class HoldInstallmentPlanUseCase implements UseCase<PaymentEventPayload, 
       plan.status = InstallmentPlanStatus.DISPUTED_HOLD;
       await queryRunner.manager.save(plan);
 
+      await this.creditScoring.markNeedsRescoring(payload.userId, queryRunner.manager);
+
       await queryRunner.commitTransaction();
     } catch (err) {
       await queryRunner.rollbackTransaction();
@@ -56,7 +65,5 @@ export class HoldInstallmentPlanUseCase implements UseCase<PaymentEventPayload, 
     } finally {
       await queryRunner.release();
     }
-
-    await this.creditScoring.markNeedsRescoring(payload.userId);
   }
 }

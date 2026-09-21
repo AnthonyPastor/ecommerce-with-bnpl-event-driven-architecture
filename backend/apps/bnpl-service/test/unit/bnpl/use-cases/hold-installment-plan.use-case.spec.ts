@@ -26,7 +26,9 @@ describe('HoldInstallmentPlanUseCase', () => {
     await useCase.execute(payload);
 
     expect(fake.saved.some((e: any) => e.status === InstallmentPlanStatus.DISPUTED_HOLD)).toBe(true);
-    expect(creditScoring.markNeedsRescoring).toHaveBeenCalledWith('user-1');
+    // Called with the use case's own queryRunner.manager so the credit-profile
+    // update commits in the same transaction as the plan status change.
+    expect(creditScoring.markNeedsRescoring).toHaveBeenCalledWith('user-1', fake.queryRunner.manager);
   });
 
   it('is idempotent when the plan is already on hold', async () => {

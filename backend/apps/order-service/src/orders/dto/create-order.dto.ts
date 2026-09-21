@@ -40,4 +40,14 @@ export class CreateOrderDto {
   @Type(() => CreateOrderItemDto)
   @ArrayMinSize(1)
   items!: CreateOrderItemDto[];
+
+  /**
+   * Caller-supplied dedupe key (cart-service sends `cart.id`) — a retry of
+   * the same checkout after a timed-out/dropped response returns the
+   * already-created order instead of creating a second one.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  idempotencyKey?: string;
 }
