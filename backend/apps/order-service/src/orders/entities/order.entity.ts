@@ -36,6 +36,15 @@ export class Order {
   @Column({ name: 'payment_incident', type: 'varchar', nullable: true })
   paymentIncident!: 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK' | null;
 
+  /**
+   * Caller-supplied dedupe key for `createOrder()` (cart-service sends
+   * `cart.id`). Nullable + unique: Postgres treats each NULL as distinct, so
+   * callers that don't pass one (or predate this column) are unaffected,
+   * while two requests with the same key can never both insert.
+   */
+  @Column({ name: 'idempotency_key', type: 'varchar', nullable: true, unique: true })
+  idempotencyKey!: string | null;
+
   @Column({ name: 'total_cents', type: 'int' })
   totalCents!: number;
 

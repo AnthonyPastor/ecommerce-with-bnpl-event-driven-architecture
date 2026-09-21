@@ -1,7 +1,11 @@
 import { EventEnvelope, KafkaTopics } from '@bnpl/event-contracts';
 import { KafkaConsumerService } from '@bnpl/kafka-client';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { BnplService, PaymentEventPayload } from './bnpl.service';
+import { ActivateInstallmentPlanUseCase } from './use-cases/activate-installment-plan.use-case';
+import { AdjustInstallmentPlanUseCase } from './use-cases/adjust-installment-plan.use-case';
+import { CancelInstallmentPlanUseCase } from './use-cases/cancel-installment-plan.use-case';
+import { HoldInstallmentPlanUseCase } from './use-cases/hold-installment-plan.use-case';
+import { PaymentEventPayload } from './use-cases/payment-event-payload';
 
 @Injectable()
 export class PaymentEventsConsumer implements OnModuleInit {
@@ -9,7 +13,10 @@ export class PaymentEventsConsumer implements OnModuleInit {
 
   constructor(
     private readonly kafkaConsumer: KafkaConsumerService,
-    private readonly bnplService: BnplService,
+    private readonly activatePlan: ActivateInstallmentPlanUseCase,
+    private readonly cancelPlan: CancelInstallmentPlanUseCase,
+    private readonly adjustPlan: AdjustInstallmentPlanUseCase,
+    private readonly holdPlan: HoldInstallmentPlanUseCase,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -29,13 +36,13 @@ export class PaymentEventsConsumer implements OnModuleInit {
     const payload = envelope.payload as PaymentEventPayload;
     switch (envelope.eventType) {
       case KafkaTopics.payment.captured:
-        return this.bnplService.activatePlanForCapturedPayment(payload);
+        return this.activatePlan.execute(payload);
       case KafkaTopics.payment.refunded:
-        return this.bnplService.cancelPlanForRefund(payload);
+        return this.cancelPlan.execute(payload);
       case KafkaTopics.payment.partiallyRefunded:
-        return this.bnplService.adjustPlanForPartialRefund(payload);
+        return this.adjustPlan.execute({ payload, eventId: envelope.eventId });
       case KafkaTopics.payment.chargebackReceived:
-        return this.bnplService.holdPlanForChargeback(payload);
+        return this.holdPlan.execute(payload);
       default:
         this.logger.warn(`Unhandled event type: ${envelope.eventType}`);
     }

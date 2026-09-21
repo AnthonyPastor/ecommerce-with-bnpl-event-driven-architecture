@@ -14,7 +14,7 @@ Run from `backend/` (the pnpm workspace root):
 pnpm install                                 # once
 pnpm --filter payment-service start:dev      # dev server, port 3005 by default
 pnpm --filter payment-service build
-pnpm --filter payment-service test           # unit tests (28 as of Fase 5)
+pnpm --filter payment-service test           # unit tests
 pnpm --filter payment-service test -- payments.service.spec   # single file
 pnpm --filter payment-service test:e2e       # needs Postgres + Kafka + RabbitMQ up, payment_db created
 ```
@@ -43,6 +43,8 @@ DISPUTED → CHARGEBACK | CAPTURED
 
 `PaymentsService.createPayment()` rejects a second `POST /payments` for an order that already has a non-terminal transaction (per `isTerminalPaymentStatus()` above) — a captured/in-flight one must stay blocked, a failed/voided/refunded/charged-back one must remain retryable. The guard-check and the new `PENDING` row's insert run inside one DB transaction, opened with `SELECT pg_advisory_xact_lock(hashtext(orderId))` first: on an order's *first* payment there's no row yet for a row-level lock to serialize on, so the advisory lock serializes concurrent `createPayment` calls on the `orderId` key itself — otherwise two concurrent requests can both read "no blocking transaction" before either's insert commits, and both proceed to double-charge.
 
+The `PENDING` row is committed *before* `gateway.authorize()` is called, and that call is bounded by `PAYMENT_GATEWAY_TIMEOUT_MS` (default 10s, via the local `withTimeout()` helper) — without it, a real gateway adapter that hangs would leave the transaction stuck at `PENDING` forever with no way out (`voidPayment()` only accepts `AUTHORIZED`). A timeout is treated exactly like any other `authorize()` failure: it drives the transaction to the terminal `AUTHORIZATION_FAILED`, which the guard above then lets be retried.
+
 ### `GET /payments?orderId=` is scoped to the caller
 
 Returns only transactions whose `userId` matches the `x-user-id` header — set by `api-gateway`'s `GatewayAuthGuard` from the verified JWT before the request ever reaches this service (see that service's CLAUDE.md). Without this, any authenticated user could read another user's payment history for an order by guessing/enumerating its id.
@@ -57,9 +59,11 @@ Pending timers are tracked per `gatewayReference` (`timersByReference`), and `vo
 
 ### The webhook pipeline: HTTP → RabbitMQ → DB, not HTTP → DB
 
-`WebhooksController.receiveWebhook()` does the minimum to respond fast: verify signature, check `WebhookEvent` idempotency (`UNIQUE(gateway, externalEventId)`), persist the raw event, publish a command to RabbitMQ (`q.payments.webhook.process`, exchange/routing key from `@bnpl/event-contracts`' `RabbitMqTopology`), and return 200. The actual state transition happens in `WebhookProcessorConsumer` (`src/payments/webhook-processor.consumer.ts`), which subscribes via `@bnpl/rabbitmq-client`'s `RabbitMqConsumerService` (retry with backoff, then DLQ, handled by that package — see its own code, not reimplemented here) and calls `PaymentsService.processWebhookEvent()`.
+`WebhooksController.receiveWebhook()` does the minimum to respond fast: verify signature, check `WebhookEvent` idempotency (`UNIQUE(gateway, externalEventId)`), persist the raw event, publish a command to RabbitMQ (`q.payments.webhook.process`, exchange/routing key from `@bnpl/event-contracts`' `RabbitMqTopology`), and return 200. A `save()` that loses a race against a truly concurrent identical delivery (both pass the `findOne` check before either commits) hits that same unique constraint — caught and turned into the normal `{ duplicate: true }` response instead of an unhandled 500. The actual state transition happens in `WebhookProcessorConsumer` (`src/payments/webhook-processor.consumer.ts`), which subscribes via `@bnpl/rabbitmq-client`'s `RabbitMqConsumerService` (retry with backoff, then DLQ, handled by that package — see its own code, not reimplemented here) and calls `PaymentsService.processWebhookEvent()`.
 
 **Why the indirection**: don't let a slow DB write block the HTTP response to a payment gateway, and get retries for free if the DB write fails.
+
+**The consumer checks `WebhookEvent.processedAt` before calling `processWebhookEvent()`**, not just after: RabbitMQ's at-least-once delivery means the same message can be redelivered (e.g. the process crashes after committing but before acking). Relying only on `assertTransition()` to catch a redelivered event isn't enough — `PARTIALLY_REFUNDED → PARTIALLY_REFUNDED` is a legitimate self-transition (a second real partial refund), so it wouldn't reject a redelivered one either. Checking `processedAt` first makes redelivery an explicit no-op instead of depending on that side effect.
 
 ### Recovering the business `transactionId` from an unrelated HTTP request
 
@@ -67,7 +71,7 @@ A webhook is a brand-new HTTP request (own `correlationId`) with no relation to 
 
 ### Partial vs. full refunds
 
-`Transaction.refundedAmountCents` accumulates across possibly-multiple partial refunds. `processWebhookEvent()`'s `refund_succeeded` branch computes `newRefundedTotal = transaction.refundedAmountCents + refundedNow` and picks `REFUNDED` (topic `payment.refunded`) vs. `PARTIALLY_REFUNDED` (topic `payment.partiallyRefunded`) based on whether that covers `amountCents`. `PaymentsService.refundPayment()` is the dev-facing trigger (`POST /payments/:id/refund`, optional `amountCents` body — omitted means "refund whatever remains").
+`Transaction.refundedAmountCents` accumulates across possibly-multiple partial refunds. `processWebhookEvent()`'s `refund_succeeded` branch delegates to `applyRefund()`, which — unlike the generic `applyTransition()` — reads the transaction with a pessimistic row lock (`lock: { mode: 'pessimistic_write' }`) and only *then* computes `newRefundedTotal`/picks `REFUNDED` (topic `payment.refunded`) vs. `PARTIALLY_REFUNDED` (topic `payment.partiallyRefunded`), inside that same locked transaction. That ordering matters: deciding the target status from an earlier, unlocked read (as this used to do) is a lost-update race — two concurrent refund webhooks could both read the same stale total and the second commit would silently drop the first's contribution. `PaymentsService.refundPayment()` is the dev-facing trigger (`POST /payments/:id/refund`, optional `amountCents` body — omitted means "refund whatever remains").
 
 ### Chargebacks don't go through the gateway
 

@@ -15,7 +15,7 @@ pnpm install                             # once
 pnpm --filter bnpl-service start:dev     # dev server, port 3006 by default
 pnpm --filter bnpl-service build
 pnpm --filter bnpl-service test          # unit tests
-pnpm --filter bnpl-service test -- bnpl.service.spec   # single file
+pnpm --filter bnpl-service test -- activate-installment-plan.use-case.spec   # single file
 pnpm --filter bnpl-service test:e2e      # needs Postgres + Kafka up, bnpl_db created
 ```
 
@@ -23,9 +23,13 @@ Local infra: `docker compose -f backend/infra/docker-compose.yml up -d`. The e2e
 
 ## Architecture
 
+### One use case per file, `execute(input)`, no god-object service
+
+There is no single `BnplService` — each business operation is its own class under `src/bnpl/use-cases/`, implementing the generic `UseCase<TInput, TOutput>` interface (`use-cases/use-case.interface.ts`: just `execute(input: TInput): Promise<TOutput>`). `PaymentEventsConsumer` and `BnplController` each inject only the use cases they actually call, instead of one constructor pulling in every dependency the service might ever need. Follow this pattern for any new bnpl-service operation — a new use case, not a new method on a shared service.
+
 ### Real-world BNPL money flow (why this service owns installments, not payment-service)
 
-The merchant is paid in full up front (that's what `payment.transaction.captured.v1` represents). From that point on, **`bnpl-service` — not the payment gateway — owns the installment schedule** and is who collects each installment from the consumer later; the payment gateway has no concept of "cuotas." This mirrors how Klarna/Affirm/Afterpay actually work. See `CreditScoringService` and `BnplService.activatePlanForCapturedPayment()`.
+The merchant is paid in full up front (that's what `payment.transaction.captured.v1` represents). From that point on, **`bnpl-service` — not the payment gateway — owns the installment schedule** and is who collects each installment from the consumer later; the payment gateway has no concept of "cuotas." This mirrors how Klarna/Affirm/Afterpay actually work. See `CreditScoringService` and `ActivateInstallmentPlanUseCase`.
 
 ### Scoring is a deliberate stub
 
@@ -33,11 +37,11 @@ The merchant is paid in full up front (that's what `payment.transaction.captured
 
 ### Reacting to payment events (`src/bnpl/payment-events.consumer.ts`)
 
-Subscribes to four Kafka topics with one handler via `KafkaConsumerService.subscribe()` (from `@bnpl/kafka-client`), then dispatches by `envelope.eventType`:
-- `payment.transaction.captured.v1` → `activatePlanForCapturedPayment()`: idempotent (checks for an existing plan by `orderId` first), skips entirely if the user's `CreditProfile.blocked`, then creates the plan (`PENDING` → outbox `bnpl.installment_plan.created.v1` → `ACTIVE` → outbox `bnpl.installment_plan.activated.v1`, both in the same DB transaction) plus 3 `Installment` rows. Splitting `totalCents` into 3 uses `Math.floor(totalCents / 3)` for the first two installments and puts the remainder on the third, so they always sum exactly.
-- `payment.transaction.refunded.v1` → `cancelPlanForRefund()`: cancels every `PENDING`/`DUE` installment, plan → `CANCELLED`.
-- `payment.transaction.partially_refunded.v1` → `adjustPlanForPartialRefund()`: scales remaining `PENDING`/`DUE` installment amounts by `(totalCents - refundedAmountCents) / totalCents`, plan → `ADJUSTED`.
-- `payment.transaction.chargeback_received.v1` → `holdPlanForChargeback()`: plan → `DISPUTED_HOLD`, `CreditProfile.needsRescoring = true`. No new domain event — this one is a pure internal state change.
+Subscribes to four Kafka topics with one handler via `KafkaConsumerService.subscribe()` (from `@bnpl/kafka-client`), then dispatches by `envelope.eventType` to one use case each:
+- `payment.transaction.captured.v1` → `ActivateInstallmentPlanUseCase`: creates the plan (`PENDING` → outbox `bnpl.installment_plan.created.v1` → `ACTIVE` → outbox `bnpl.installment_plan.activated.v1`, both in the same DB transaction) plus 3 `Installment` rows, skipping entirely if `paymentMethod` was `FULL` or the user's `CreditProfile.blocked`. Splitting `totalCents` into 3 uses `Math.floor(totalCents / 3)` for the first two installments and puts the remainder on the third, so they always sum exactly. Idempotent against Kafka redelivery via `SELECT pg_advisory_xact_lock(hashtext(orderId))` (same pattern as `payment-service`'s `PaymentsService.createPayment()`) plus a unique index on `InstallmentPlan.orderId` as a DB-level backstop.
+- `payment.transaction.refunded.v1` → `CancelInstallmentPlanUseCase`: cancels every `PENDING`/`DUE` installment, plan → `CANCELLED`. Idempotent via a pessimistic row lock (`findOne(..., { lock: { mode: 'pessimistic_write' } })`) plus an early-return once `status` is already `CANCELLED` — the same idiom `order-service`'s `OrdersService.markRefunded()` uses.
+- `payment.transaction.partially_refunded.v1` → `AdjustInstallmentPlanUseCase`: scales remaining `PENDING`/`DUE` installment amounts by `(totalCents - refundedAmountCents) / totalCents`, where `refundedAmountCents` is the plan's *cumulative* refunded total (mirroring `Transaction.refundedAmountCents` in payment-service) and the factor is always applied to each installment's immutable `originalAmountCents`, never to its already-adjusted `amountCents` — so a second partial refund reflects the combined total instead of compounding on top of the first. A plain status guard can't detect redelivery here (a second *legitimate* partial refund also leaves `status` at `ADJUSTED`), so this one additionally tracks `lastRefundEventId` (the Kafka envelope's `eventId`) to distinguish "already applied this exact event" from "a new partial refund arrived."
+- `payment.transaction.chargeback_received.v1` → `HoldInstallmentPlanUseCase`: plan → `DISPUTED_HOLD`, `CreditProfile.needsRescoring = true`. No new domain event — this one is a pure internal state change, so no outbox write, just the plan+lock/guard for idempotency.
 
 All four reuse the same `saveWithOutbox` transactional-outbox pattern as `order-service` (see that service's CLAUDE.md for the pattern itself).
 
