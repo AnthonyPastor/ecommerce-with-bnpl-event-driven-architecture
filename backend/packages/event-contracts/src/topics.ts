@@ -18,6 +18,7 @@ export const KafkaTopics = {
     partiallyRefunded: 'payment.transaction.partially_refunded.v1',
     refunded: 'payment.transaction.refunded.v1',
     disputeOpened: 'payment.transaction.dispute_opened.v1',
+    disputeResolved: 'payment.transaction.dispute_resolved.v1',
     chargebackReceived: 'payment.transaction.chargeback_received.v1',
     cancelled: 'payment.transaction.cancelled.v1',
     installmentChargeCaptured: 'payment.installment_charge.captured.v1',

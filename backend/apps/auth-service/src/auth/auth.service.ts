@@ -25,14 +25,21 @@ export class AuthService {
     @Inject(AUTH_TOKEN_PROVIDER) private readonly tokenProvider: TokenProviderPort,
   ) {}
 
-  async register(input: { email: string; password: string; name: string }): Promise<User> {
+  async register(input: {
+    email: string;
+    password: string;
+    name: string;
+  }): Promise<{ user: User; tokens: AuthTokens }> {
     const existing = await this.users.findOne({ where: { email: input.email } });
     if (existing) {
       throw new ConflictException('Email already registered');
     }
     const passwordHash = await bcrypt.hash(input.password, 10);
-    const user = this.users.create({ email: input.email, passwordHash, name: input.name });
-    return this.users.save(user);
+    const user = await this.users.save(
+      this.users.create({ email: input.email, passwordHash, name: input.name }),
+    );
+    const tokens = await this.issueTokenPair(user.id, user.email);
+    return { user, tokens };
     // TODO(phase 2+): publish auth.user.registered.v1 via outbox once
     // packages/outbox and packages/kafka-client exist.
   }

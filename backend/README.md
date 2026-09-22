@@ -68,14 +68,17 @@ This guarantees that every event Kafka ends up seeing corresponds to a change th
 |---|---|---|
 | `order.order.created.v1` | order-service | notification-service |
 | `order.order.confirmed.v1` | order-service | — (defined; consumed by nothing today, but no longer untriggered — see below) |
-| `order.order.cancelled.v1` | order-service | — (defined, no flow triggers it yet) |
+| `order.order.cancelled.v1` | order-service | — |
 | `order.order.refunded.v1` | order-service | — |
 | `payment.transaction.authorized.v1` / `.captured.v1` | payment-service | bnpl-service (captured → activates the installment plan), order-service (captured → confirms the order, emits `order.order.confirmed.v1`) |
-| `payment.transaction.authorization_failed.v1` / `.capture_failed.v1` | payment-service | — |
-| `payment.transaction.voided.v1` / `.cancelled.v1` | payment-service | — |
+| `payment.transaction.authorization_failed.v1` | payment-service | order-service (cancels the order), notification-service (email) |
+| `payment.transaction.capture_failed.v1` | payment-service | notification-service (email) |
+| `payment.transaction.voided.v1` | payment-service | order-service (cancels the order) |
+| `payment.transaction.cancelled.v1` | payment-service | — |
 | `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan), order-service (mirrors the signal onto the order's payment status) |
 | `payment.transaction.refunded.v1` | payment-service | order-service (marks the order `REFUNDED`), bnpl-service (cancels the plan), notification-service (email) |
 | `payment.transaction.dispute_opened.v1` | payment-service | order-service (mirrors the signal onto the order's payment status) |
+| `payment.transaction.dispute_resolved.v1` | payment-service | order-service (clears the payment-incident signal), bnpl-service (takes the plan off `DISPUTED_HOLD`) |
 | `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag), order-service (mirrors the signal onto the order's payment status) |
 | `payment.installment_charge.captured.v1` / `.capture_failed.v1` | payment-service | bnpl-service (marks the installment `PAID`, or retries/`DEFAULTED`s it) |
 | `bnpl.installment_plan.created.v1` / `.activated.v1` / `.adjusted.v1` / `.cancelled.v1` | bnpl-service | — |
@@ -112,7 +115,9 @@ the system — every transition is validated by `assertTransition()` against
 `PAYMENT_TRANSITIONS` (`packages/event-contracts/src/enums.ts`) and persisted
 atomically with its outbox event by `PaymentsService`'s private
 `applyTransition()`. `CANCELLED` is a defined-but-currently-unreachable edge
-(no code path produces it yet) — shown for completeness.
+(no code path produces it yet) — shown for completeness. `DISPUTED →
+CAPTURED` (a dispute resolved in the merchant's favor) is reachable via
+`POST /payments/:id/resolve-dispute` — see flow #3 below.
 
 ```mermaid
 stateDiagram-v2
@@ -244,8 +249,9 @@ a different method for each.
 
 - **Void** (`POST /payments/:id/void`, requires `AUTHORIZED`): calls
   `PaymentGatewayPort.void()` synchronously (no webhook involved) →
-  `applyTransition(VOIDED)` → outbox → `payment.transaction.voided.v1`. No
-  consumer currently reacts to this topic.
+  `applyTransition(VOIDED)` → outbox → `payment.transaction.voided.v1`.
+  `order-service` reacts by cancelling the order (`cancelOrder()`, only from
+  `CREATED` — see below).
 - **Chargeback** (`POST /payments/:id/simulate-chargeback`, requires
   `CAPTURED`/`PARTIALLY_REFUNDED`): a real chargeback is initiated by the
   card network, not the merchant, so this endpoint deliberately **doesn't**
@@ -258,12 +264,23 @@ a different method for each.
   `Order.paymentIncident` (`markPaymentIncident`), so the order's computed
   payment status reflects `DISPUTED`/`CHARGEBACK` instead of staying at
   whatever it was when the order was last confirmed.
+- **Dispute resolved** (`POST /payments/:id/resolve-dispute`, requires
+  `DISPUTED`): the mirror image of opening a dispute — the card network
+  ruled in the merchant's favor, so this also bypasses `PaymentGatewayPort`
+  and fires a single direct transition, `DISPUTED → CAPTURED`
+  (`dispute_resolved.v1`). `bnpl-service` reacts by taking the plan off
+  `DISPUTED_HOLD` back to `ACTIVE`; `order-service` clears
+  `Order.paymentIncident` back to `null`, the same way a full refund does.
 - **Authorization failure**: if the synchronous `PaymentGatewayPort.authorize()`
   call in `createPayment()` throws, `applyTransition(AUTHORIZATION_FAILED)`
   still runs (outbox → `payment.transaction.authorization_failed.v1`) before
   the original error is re-thrown to the caller — so `POST /payments` itself
   returns an error even though the failed-state transition was durably
-  persisted and published.
+  persisted and published. `order-service` reacts the same way it does to a
+  void: `cancelOrder()`, so the order doesn't sit at `CREATED` forever with
+  no payment behind it. Both reactions are idempotent no-ops for an order
+  that already moved past `CREATED` some other way (e.g. a retried payment
+  on the same order eventually captures).
 
 ### 4. Notifications: Kafka → RabbitMQ → email (two hops, on purpose)
 

@@ -8,6 +8,7 @@ import { HoldInstallmentPlanUseCase } from './use-cases/hold-installment-plan.us
 import { MarkInstallmentFailedUseCase } from './use-cases/mark-installment-failed.use-case';
 import { MarkInstallmentPaidUseCase } from './use-cases/mark-installment-paid.use-case';
 import { PaymentEventPayload } from './use-cases/payment-event-payload';
+import { ResumeInstallmentPlanUseCase } from './use-cases/resume-installment-plan.use-case';
 
 @Injectable()
 export class PaymentEventsConsumer implements OnModuleInit {
@@ -21,6 +22,7 @@ export class PaymentEventsConsumer implements OnModuleInit {
     private readonly holdPlan: HoldInstallmentPlanUseCase,
     private readonly markInstallmentPaid: MarkInstallmentPaidUseCase,
     private readonly markInstallmentFailed: MarkInstallmentFailedUseCase,
+    private readonly resumePlan: ResumeInstallmentPlanUseCase,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -32,6 +34,7 @@ export class PaymentEventsConsumer implements OnModuleInit {
         KafkaTopics.payment.chargebackReceived,
         KafkaTopics.payment.installmentChargeCaptured,
         KafkaTopics.payment.installmentChargeFailed,
+        KafkaTopics.payment.disputeResolved,
       ],
       (envelope) => this.handle(envelope),
       'bnpl-service',
@@ -53,6 +56,8 @@ export class PaymentEventsConsumer implements OnModuleInit {
         return this.markInstallmentPaid.execute(payload);
       case KafkaTopics.payment.installmentChargeFailed:
         return this.markInstallmentFailed.execute(payload);
+      case KafkaTopics.payment.disputeResolved:
+        return this.resumePlan.execute(payload);
       default:
         this.logger.warn(`Unhandled event type: ${envelope.eventType}`);
     }

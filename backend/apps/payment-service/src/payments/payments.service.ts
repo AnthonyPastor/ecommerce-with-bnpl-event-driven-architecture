@@ -339,6 +339,34 @@ export class PaymentsService {
     );
   }
 
+  /**
+   * Dev endpoint that simulates the card network resolving an open dispute
+   * in the merchant's favor — like `simulateChargeback()`, this is NOT
+   * triggered by the merchant, so it drives the transition directly
+   * (DISPUTED -> CAPTURED) without going through the gateway or a real
+   * webhook.
+   */
+  async resolveDispute(transactionId: string): Promise<Transaction> {
+    const transaction = await this.findById(transactionId);
+    if (transaction.status !== PaymentStatus.DISPUTED) {
+      throw new BadRequestException(`Cannot resolve a dispute on a transaction in status ${transaction.status}`);
+    }
+
+    return this.applyTransition(
+      transactionId,
+      PaymentStatus.CAPTURED,
+      'webhook',
+      KafkaTopics.payment.disputeResolved,
+      {
+        transactionId,
+        orderId: transaction.orderId,
+        userId: transaction.userId,
+        amountCents: transaction.amountCents,
+        currency: transaction.currency,
+      },
+    );
+  }
+
   /** Applies the state transition corresponding to an already-normalized incoming webhook. */
   async processWebhookEvent(transactionId: string, event: NormalizedWebhookEvent): Promise<void> {
     const transaction = await this.transactions.findOneOrFail({ where: { id: transactionId } });

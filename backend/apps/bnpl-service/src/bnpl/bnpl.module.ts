@@ -18,6 +18,7 @@ import { ListInstallmentPlansUseCase } from './use-cases/list-installment-plans.
 import { MarkInstallmentFailedUseCase } from './use-cases/mark-installment-failed.use-case';
 import { MarkInstallmentPaidUseCase } from './use-cases/mark-installment-paid.use-case';
 import { PollDueInstallmentsUseCase } from './use-cases/poll-due-installments.use-case';
+import { ResumeInstallmentPlanUseCase } from './use-cases/resume-installment-plan.use-case';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PollDueInstallmentsUseCase } from './use-cases/poll-due-installments.us
     CancelInstallmentPlanUseCase,
     AdjustInstallmentPlanUseCase,
     HoldInstallmentPlanUseCase,
+    ResumeInstallmentPlanUseCase,
     GetInstallmentPlanUseCase,
     ListInstallmentPlansUseCase,
     ChargeDueInstallmentUseCase,

@@ -41,7 +41,7 @@ function makeService(overrides?: {
     : makeFakeQueryRunner(overrides?.seed, overrides?.existingByIdempotencyKey);
 
   const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
-  const ordersRepo = { findOne: jest.fn(), find: jest.fn() };
+  const ordersRepo = { findOne: jest.fn(), find: jest.fn(), update: jest.fn(async () => ({ affected: 1 })) };
   const requestContext = {
     getCorrelationId: jest.fn(() => 'corr-1'),
     setTransactionId: jest.fn(),
@@ -233,6 +233,46 @@ describe('OrdersService.markRefunded', () => {
     const { service } = makeService({ queryRunner });
 
     await service.markRefunded('order-1');
+
+    expect(queryRunner.manager.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrdersService.clearPaymentIncident', () => {
+  it('clears paymentIncident back to null', async () => {
+    const { service, ordersRepo } = makeService();
+
+    await service.clearPaymentIncident('order-1');
+
+    expect(ordersRepo.update).toHaveBeenCalledWith({ id: 'order-1' }, { paymentIncident: null });
+  });
+
+  it('throws NotFoundException when the order does not exist', async () => {
+    const { service, ordersRepo } = makeService();
+    ordersRepo.update.mockResolvedValueOnce({ affected: 0 } as never);
+
+    await expect(service.clearPaymentIncident('missing-order')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('OrdersService.cancelOrder', () => {
+  it('transitions a CREATED order to CANCELLED and writes the outbox event', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CREATED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.cancelOrder('order-1');
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'CANCELLED' }),
+    );
+    expect(queryRunner.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('is idempotent: does nothing if the order already moved past CREATED', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CONFIRMED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.cancelOrder('order-1');
 
     expect(queryRunner.manager.save).not.toHaveBeenCalled();
   });
