@@ -20,6 +20,8 @@ export class PaymentEventsConsumer implements OnModuleInit {
         KafkaTopics.payment.partiallyRefunded,
         KafkaTopics.payment.disputeOpened,
         KafkaTopics.payment.chargebackReceived,
+        KafkaTopics.payment.authorizationFailed,
+        KafkaTopics.payment.voided,
       ],
       (envelope) => this.handle(envelope),
       'order-service',
@@ -57,6 +59,10 @@ export class PaymentEventsConsumer implements OnModuleInit {
           break;
         case KafkaTopics.payment.chargebackReceived:
           await this.ordersService.markPaymentIncident(payload.orderId, 'CHARGEBACK');
+          break;
+        case KafkaTopics.payment.authorizationFailed:
+        case KafkaTopics.payment.voided:
+          await this.ordersService.cancelOrder(payload.orderId);
           break;
       }
     } catch (err) {
