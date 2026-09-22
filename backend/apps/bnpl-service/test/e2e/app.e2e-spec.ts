@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { KafkaTopics, buildEventEnvelope } from '@bnpl/event-contracts';
+import { InstallmentStatus, KafkaTopics, buildEventEnvelope } from '@bnpl/event-contracts';
 import { envelopeToHeaders } from '@bnpl/kafka-client';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
 import { Kafka } from 'kafkajs';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { CreditProfile } from '../../src/bnpl/entities/credit-profile.entity';
+import { Installment } from '../../src/bnpl/entities/installment.entity';
+import { PollDueInstallmentsUseCase } from '../../src/bnpl/use-cases/poll-due-installments.use-case';
 
 // Assumes `docker compose -f backend/infra/docker-compose.yml up -d` has
 // already run (real Postgres on bnpl_db, real Kafka on localhost:9092). This
@@ -42,6 +46,7 @@ describe('BnplController (e2e)', () => {
     'consuming payment.transaction.captured.v1 creates an ACTIVE plan with 3 installments summing the total',
     async () => {
       const orderId = `order-${randomUUID()}`;
+      const userId = `user-${randomUUID()}`;
       const transactionId = randomUUID();
       const correlationId = `corr-${randomUUID()}`;
 
@@ -55,7 +60,7 @@ describe('BnplController (e2e)', () => {
         payload: {
           transactionId,
           orderId,
-          userId: 'user-1',
+          userId,
           amountCents: 3000,
           currency: 'USD',
         },
@@ -81,11 +86,116 @@ describe('BnplController (e2e)', () => {
 
       expect(plans).toHaveLength(1);
       const [plan] = plans;
-      expect(plan).toMatchObject({ orderId, userId: 'user-1', status: 'ACTIVE', totalCents: 3000 });
+      expect(plan).toMatchObject({ orderId, userId, status: 'ACTIVE', totalCents: 3000 });
       expect(plan.installments).toHaveLength(3);
       const sum = plan.installments.reduce((acc: number, i: any) => acc + i.amountCents, 0);
       expect(sum).toBe(3000);
     },
     15000,
+  );
+
+  /** Publishes a synthetic envelope directly to Kafka, same technique as the test above. */
+  async function publishSyntheticEvent(
+    eventType: string,
+    aggregateId: string,
+    orderId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const envelope = buildEventEnvelope({
+      eventType,
+      aggregateType: 'Transaction',
+      aggregateId,
+      producer: 'payment-service',
+      correlationId: `corr-${randomUUID()}`,
+      transactionId: orderId,
+      payload,
+    });
+
+    const kafka = new Kafka({ clientId: 'bnpl-service-e2e-test', brokers: ['localhost:9092'] });
+    const producer = kafka.producer();
+    await producer.connect();
+    await producer.send({
+      topic: eventType,
+      messages: [{ key: aggregateId, value: JSON.stringify(envelope), headers: envelopeToHeaders(envelope) }],
+    });
+    await producer.disconnect();
+  }
+
+  async function createActivePlan(orderId: string, userId: string): Promise<void> {
+    await publishSyntheticEvent(KafkaTopics.payment.captured, randomUUID(), orderId, {
+      transactionId: randomUUID(),
+      orderId,
+      userId,
+      amountCents: 3000,
+      currency: 'USD',
+    });
+
+    for (let i = 0; i < 30; i++) {
+      const res = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
+      if (res.body.length > 0) return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    throw new Error(`Plan for order ${orderId} was never created`);
+  }
+
+  it(
+    'the hourly poller marks a due installment DUE and publishes bnpl.installment.due.v1',
+    async () => {
+      const orderId = `order-${randomUUID()}`;
+      const userId = `user-${randomUUID()}`;
+      await createActivePlan(orderId, userId);
+
+      const plansRes = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
+      const firstInstallmentId = plansRes.body[0].installments[0].id;
+
+      // Backdate the first installment so the poller picks it up — there's
+      // no HTTP endpoint for this (installments only get real future due
+      // dates from ActivateInstallmentPlanUseCase), so go straight to the DB.
+      const installments = app.get(getRepositoryToken(Installment));
+      await installments.update({ id: firstInstallmentId }, { dueDate: new Date(Date.now() - 60000) });
+
+      await app.get(PollDueInstallmentsUseCase).execute();
+
+      const updatedRes = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
+      const updated = updatedRes.body[0].installments.find((i: any) => i.id === firstInstallmentId);
+      expect(updated.status).toBe(InstallmentStatus.DUE);
+    },
+    20000,
+  );
+
+  it(
+    'three consecutive installment_charge.capture_failed.v1 events DEFAULT the installment and block the credit profile',
+    async () => {
+      const orderId = `order-${randomUUID()}`;
+      const userId = `user-${randomUUID()}`;
+      await createActivePlan(orderId, userId);
+
+      const plansRes = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
+      const installmentId = plansRes.body[0].installments[0].id;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await publishSyntheticEvent(KafkaTopics.payment.installmentChargeFailed, randomUUID(), orderId, {
+          transactionId: randomUUID(),
+          installmentId,
+          orderId,
+          userId,
+        });
+
+        const expectedStatus = attempt < 3 ? InstallmentStatus.PENDING : InstallmentStatus.DEFAULTED;
+        let status: string | undefined;
+        for (let i = 0; i < 30; i++) {
+          const res = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
+          status = res.body[0].installments.find((inst: any) => inst.id === installmentId)?.status;
+          if (status === expectedStatus) break;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        expect(status).toBe(expectedStatus);
+      }
+
+      const creditProfiles = app.get(getRepositoryToken(CreditProfile));
+      const profile = await creditProfiles.findOne({ where: { userId } });
+      expect(profile?.blocked).toBe(true);
+    },
+    30000,
   );
 });

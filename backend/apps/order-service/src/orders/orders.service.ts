@@ -257,6 +257,57 @@ export class OrdersService {
   }
 
   /**
+   * Reaction to `payment.transaction.authorization_failed.v1` / `.voided.v1`:
+   * an order whose payment never actually went through shouldn't stay stuck
+   * at CREATED forever with no way out — mirrors `markRefunded()`'s shape,
+   * but only cancels from CREATED (a payment failing/voiding after the order
+   * was already CONFIRMED, REFUNDED, or CANCELLED some other way is left
+   * alone, same idempotent-no-op idiom as `markConfirmed()`).
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const order = await queryRunner.manager.findOneOrFail(Order, {
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (order.status !== OrderStatus.CREATED) {
+        await queryRunner.rollbackTransaction();
+        return; // idempotent: already confirmed, refunded, or cancelled some other way
+      }
+
+      const fromStatus = order.status;
+      order.status = OrderStatus.CANCELLED;
+
+      const saved = await saveWithOutbox(queryRunner, order, {
+        eventType: KafkaTopics.order.cancelled,
+        aggregateType: 'Order',
+        aggregateId: order.id,
+        correlationId: this.requestContext.getCorrelationId() ?? 'unknown',
+        transactionId: order.id,
+        payload: { orderId: order.id, userId: order.userId },
+      });
+
+      const history = queryRunner.manager.create(OrderStatusHistory, {
+        order: saved,
+        fromStatus,
+        toStatus: OrderStatus.CANCELLED,
+      });
+      await queryRunner.manager.save(history);
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
    * Reaction to `payment.transaction.partially_refunded.v1` / `.dispute_opened.v1`
    * / `.chargeback_received.v1`: mirrors the payment health signal onto the
    * order so the computed `paymentStatus` reflects it. This isn't itself an
@@ -269,6 +320,19 @@ export class OrdersService {
     incident: 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK',
   ): Promise<void> {
     const result = await this.orders.update({ id: orderId }, { paymentIncident: incident });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Order ${orderId} not found`);
+    }
+  }
+
+  /**
+   * Reaction to `payment.transaction.dispute_resolved.v1`: a dispute that
+   * was resolved in the merchant's favor supersedes the `DISPUTED` signal
+   * `markPaymentIncident` recorded, same idea as `markRefunded` clearing it
+   * for a full refund.
+   */
+  async clearPaymentIncident(orderId: string): Promise<void> {
+    const result = await this.orders.update({ id: orderId }, { paymentIncident: null });
     if (result.affected === 0) {
       throw new NotFoundException(`Order ${orderId} not found`);
     }

@@ -52,4 +52,10 @@ export class PaymentsController {
   simulateChargeback(@Param('id') id: string) {
     return this.paymentsService.simulateChargeback(id);
   }
+
+  /** Dev: simulates the card network resolving an open dispute in the merchant's favor. */
+  @Post(':id/resolve-dispute')
+  resolveDispute(@Param('id') id: string) {
+    return this.paymentsService.resolveDispute(id);
+  }
 }

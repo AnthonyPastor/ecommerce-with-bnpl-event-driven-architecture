@@ -32,6 +32,18 @@ describe('buildEmailCommand', () => {
     expect(command?.template).toBe('payment_refunded');
   });
 
+  it('maps payment.transaction.authorization_failed.v1 to a payment_authorization_failed email', () => {
+    const command = buildEmailCommand(
+      envelope(KafkaTopics.payment.authorizationFailed, { userId: 'user-5' }),
+    );
+    expect(command?.template).toBe('payment_authorization_failed');
+  });
+
+  it('maps payment.transaction.capture_failed.v1 to a payment_capture_failed email', () => {
+    const command = buildEmailCommand(envelope(KafkaTopics.payment.captureFailed, { userId: 'user-6' }));
+    expect(command?.template).toBe('payment_capture_failed');
+  });
+
   it('returns null for event types we do not send email for', () => {
     const command = buildEmailCommand(envelope(KafkaTopics.cart.checkedOut, { userId: 'user-4' }));
     expect(command).toBeNull();

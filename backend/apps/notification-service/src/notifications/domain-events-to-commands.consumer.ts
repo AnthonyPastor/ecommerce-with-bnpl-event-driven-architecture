@@ -22,7 +22,13 @@ export class DomainEventsToCommandsConsumer implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.kafkaConsumer.subscribe(
-      [KafkaTopics.order.created, KafkaTopics.bnpl.installmentDue, KafkaTopics.payment.refunded],
+      [
+        KafkaTopics.order.created,
+        KafkaTopics.bnpl.installmentDue,
+        KafkaTopics.payment.refunded,
+        KafkaTopics.payment.authorizationFailed,
+        KafkaTopics.payment.captureFailed,
+      ],
       (envelope) => this.translate(envelope),
       'notification-service',
     );
@@ -58,6 +64,10 @@ export function buildEmailCommand(envelope: EventEnvelope): SendEmailCommand | n
       return { to, template: 'installment_due', data: payload };
     case KafkaTopics.payment.refunded:
       return { to, template: 'payment_refunded', data: payload };
+    case KafkaTopics.payment.authorizationFailed:
+      return { to, template: 'payment_authorization_failed', data: payload };
+    case KafkaTopics.payment.captureFailed:
+      return { to, template: 'payment_capture_failed', data: payload };
     default:
       return null;
   }

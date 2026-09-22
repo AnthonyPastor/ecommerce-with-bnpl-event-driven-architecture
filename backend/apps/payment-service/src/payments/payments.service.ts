@@ -65,6 +65,7 @@ export class PaymentsService {
         id: randomUUID(),
         orderId: dto.orderId,
         userId: dto.userId,
+        installmentId: null,
         amountCents: dto.amountCents,
         currency: dto.currency ?? 'USD',
         status: PaymentStatus.PENDING,
@@ -142,6 +143,115 @@ export class PaymentsService {
         // Genuinely failed/rejected too (not just a timeout) — nothing to reconcile.
       },
     );
+  }
+
+  /**
+   * Charges one bnpl-service installment, triggered by the
+   * `payment.charge_installment` RabbitMQ command (see
+   * `InstallmentChargeConsumer`) — bnpl-service's poller is the caller, not
+   * an HTTP client. Mirrors `createPayment()`'s sync-authorize/async-capture
+   * shape exactly (same gateway, same state machine), but:
+   * - idempotency is keyed on `installmentId`, not `orderId` — the order's
+   *   *original* Transaction is still `CAPTURED` (non-terminal in the sense
+   *   `createPayment()`'s guard cares about) for the plan's whole lifetime,
+   *   so an installment charge needs its own lock/guard, not `createPayment()`'s.
+   * - a redelivered/duplicate charge command for an installment that already
+   *   has a non-terminal charge Transaction in flight is a safe no-op
+   *   (returns null) rather than a thrown `ConflictException` — this is a
+   *   command queue, not a client-facing endpoint, so a "duplicate" isn't a
+   *   caller error to reject, just redelivery to ignore.
+   */
+  async chargeInstallment(input: {
+    installmentId: string;
+    orderId: string;
+    userId: string;
+    amountCents: number;
+    currency: string;
+  }): Promise<Transaction | null> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    let pending: Transaction;
+    try {
+      await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.installmentId]);
+
+      const existingForInstallment = await queryRunner.manager.find(Transaction, {
+        where: { installmentId: input.installmentId },
+      });
+      const blocking = existingForInstallment.find((t) => !isTerminalPaymentStatus(t.status));
+      if (blocking) {
+        this.logger.log(
+          `Installment ${input.installmentId} already has an in-flight charge (transaction ${blocking.id}), ignoring redelivery`,
+        );
+        await queryRunner.rollbackTransaction();
+        return null;
+      }
+
+      pending = queryRunner.manager.create(Transaction, {
+        id: randomUUID(),
+        orderId: input.orderId,
+        userId: input.userId,
+        installmentId: input.installmentId,
+        amountCents: input.amountCents,
+        currency: input.currency,
+        status: PaymentStatus.PENDING,
+        paymentMethod: PaymentMethod.INSTALLMENTS,
+        gatewayProvider: 'fake',
+        gatewayReference: null,
+        refundedAmountCents: 0,
+      });
+      await queryRunner.manager.save(pending);
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+
+    const { id, currency } = pending;
+    const authorizePromise = this.gateway.authorize({ transactionId: id, amountCents: input.amountCents, currency });
+
+    try {
+      const result = await withTimeout(
+        authorizePromise,
+        this.gatewayTimeoutMs,
+        `Gateway authorize timed out after ${this.gatewayTimeoutMs}ms`,
+      );
+
+      return await this.applyTransition(
+        id,
+        PaymentStatus.AUTHORIZED,
+        'sync',
+        KafkaTopics.payment.authorized,
+        { transactionId: id, installmentId: input.installmentId, orderId: input.orderId, userId: input.userId, amountCents: input.amountCents, currency },
+        { gatewayReference: result.gatewayReference },
+      );
+    } catch (err) {
+      // Unlike createPayment()'s AUTHORIZATION_FAILED, this publishes the
+      // installment-specific "charge failed" topic (not the generic
+      // payment.transaction.authorization_failed.v1) — bnpl-service's retry/
+      // DEFAULTED bookkeeping needs to hear about this regardless of which
+      // stage of the charge failed, and this also keeps the noise out of
+      // order-service's original-payment-failure reaction (harmless either
+      // way there, since it's a no-op past CREATED, but this is clearer).
+      await this.applyTransition(
+        id,
+        PaymentStatus.AUTHORIZATION_FAILED,
+        'sync',
+        KafkaTopics.payment.installmentChargeFailed,
+        {
+          transactionId: id,
+          installmentId: input.installmentId,
+          orderId: input.orderId,
+          userId: input.userId,
+          reason: (err as Error).message,
+        },
+      );
+      this.reconcileLateAuthorization(id, authorizePromise);
+      throw err;
+    }
   }
 
   /**
@@ -229,14 +339,51 @@ export class PaymentsService {
     );
   }
 
+  /**
+   * Dev endpoint that simulates the card network resolving an open dispute
+   * in the merchant's favor — like `simulateChargeback()`, this is NOT
+   * triggered by the merchant, so it drives the transition directly
+   * (DISPUTED -> CAPTURED) without going through the gateway or a real
+   * webhook.
+   */
+  async resolveDispute(transactionId: string): Promise<Transaction> {
+    const transaction = await this.findById(transactionId);
+    if (transaction.status !== PaymentStatus.DISPUTED) {
+      throw new BadRequestException(`Cannot resolve a dispute on a transaction in status ${transaction.status}`);
+    }
+
+    return this.applyTransition(
+      transactionId,
+      PaymentStatus.CAPTURED,
+      'webhook',
+      KafkaTopics.payment.disputeResolved,
+      {
+        transactionId,
+        orderId: transaction.orderId,
+        userId: transaction.userId,
+        amountCents: transaction.amountCents,
+        currency: transaction.currency,
+      },
+    );
+  }
+
   /** Applies the state transition corresponding to an already-normalized incoming webhook. */
   async processWebhookEvent(transactionId: string, event: NormalizedWebhookEvent): Promise<void> {
     const transaction = await this.transactions.findOneOrFail({ where: { id: transactionId } });
 
     switch (event.eventType) {
-      case 'capture_succeeded':
-        await this.applyTransition(transaction.id, PaymentStatus.CAPTURED, 'webhook', KafkaTopics.payment.captured, {
+      case 'capture_succeeded': {
+        // An installment charge's Transaction carries installmentId — route
+        // its capture to the installment-specific topic instead of the
+        // generic one, so bnpl-service's PaymentEventsConsumer doesn't
+        // mistake it for the order's original capture (which would try to
+        // re-confirm the order / re-activate the plan).
+        const eventType = transaction.installmentId
+          ? KafkaTopics.payment.installmentChargeCaptured
+          : KafkaTopics.payment.captured;
+        await this.applyTransition(transaction.id, PaymentStatus.CAPTURED, 'webhook', eventType, {
           transactionId: transaction.id,
+          installmentId: transaction.installmentId,
           orderId: transaction.orderId,
           userId: transaction.userId,
           amountCents: event.amountCents ?? transaction.amountCents,
@@ -244,16 +391,20 @@ export class PaymentsService {
           paymentMethod: transaction.paymentMethod,
         });
         return;
+      }
 
-      case 'capture_failed':
-        await this.applyTransition(
-          transaction.id,
-          PaymentStatus.CAPTURE_FAILED,
-          'webhook',
-          KafkaTopics.payment.captureFailed,
-          { transactionId: transaction.id, orderId: transaction.orderId, userId: transaction.userId },
-        );
+      case 'capture_failed': {
+        const eventType = transaction.installmentId
+          ? KafkaTopics.payment.installmentChargeFailed
+          : KafkaTopics.payment.captureFailed;
+        await this.applyTransition(transaction.id, PaymentStatus.CAPTURE_FAILED, 'webhook', eventType, {
+          transactionId: transaction.id,
+          installmentId: transaction.installmentId,
+          orderId: transaction.orderId,
+          userId: transaction.userId,
+        });
         return;
+      }
 
       case 'refund_succeeded':
         await this.applyRefund(transaction.id, event.amountCents, 'webhook');

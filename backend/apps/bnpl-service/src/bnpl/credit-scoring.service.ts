@@ -37,4 +37,12 @@ export class CreditScoringService {
     profile.needsRescoring = true;
     await repo.save(profile);
   }
+
+  /** Pass `manager` (a use case's `queryRunner.manager`) to run as part of an existing transaction instead of its own. */
+  async markBlocked(userId: string, manager?: EntityManager): Promise<void> {
+    const repo = manager ? manager.getRepository(CreditProfile) : this.profiles;
+    const profile = await this.getOrCreateProfile(userId, manager);
+    profile.blocked = true;
+    await repo.save(profile);
+  }
 }

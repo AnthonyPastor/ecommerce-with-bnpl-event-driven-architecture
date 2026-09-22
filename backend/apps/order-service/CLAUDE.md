@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this service is
 
-`order-service` is one of the independently deployable NestJS microservices of the BNPL system (see the root `README.md`). It owns orders: creation (called synchronously by `cart-service` at checkout), and reacting to payment-service's events — confirming an order once its payment captures, marking it `REFUNDED` on a full refund, and mirroring dispute/chargeback/partial-refund signals onto it in between. It is the service where the business `transactionId` (as opposed to the request-scoped `correlationId`) is born — see below.
+`order-service` is one of the independently deployable NestJS microservices of the BNPL system (see the root `README.md`). It owns orders: creation (called synchronously by `cart-service` at checkout), and reacting to payment-service's events — confirming an order once its payment captures, marking it `REFUNDED` on a full refund, cancelling it if the payment never went through, and mirroring dispute/chargeback/partial-refund signals onto it in between. It is the service where the business `transactionId` (as opposed to the request-scoped `correlationId`) is born — see below.
 
 ## Commands
 
@@ -39,11 +39,13 @@ Local infra: `docker compose -f backend/infra/docker-compose.yml up -d` (needs P
 
 ### Reacting to payment events
 
-`PaymentEventsConsumer` (`src/orders/payment-events.consumer.ts`) subscribes to five topics from payment-service and routes each to a matching `OrdersService` method. Errors from any of them are caught and logged, not rethrown — a missing/already-processed order should not crash the consumer or trigger Kafka's retry/rebalance behavior.
+`PaymentEventsConsumer` (`src/orders/payment-events.consumer.ts`) subscribes to eight topics from payment-service and routes each to a matching `OrdersService` method. Errors from any of them are caught and logged, not rethrown — a missing/already-processed order should not crash the consumer or trigger Kafka's retry/rebalance behavior.
 
 - `payment.transaction.captured.v1` → `markConfirmed(orderId, paymentMethod)`: CREATED → CONFIRMED, idempotent (no-op once already past CREATED), takes a `pessimistic_write` row lock on the SELECT so an at-least-once duplicate delivery can't race a still-in-flight call into double-confirming. `paymentMethod` normally comes straight from the payload (payment-service's `Transaction.paymentMethod` is NOT NULL); a missing value is treated as a schema-drift edge case and defaults to `INSTALLMENTS` with a warning log, not silently trusted.
 - `payment.transaction.refunded.v1` (full refund) → `markRefunded(orderId)`: → `REFUNDED`, idempotent, also clears any `paymentIncident` (a full refund supersedes a prior dispute/chargeback/partial-refund signal). Same `pessimistic_write` locking as `markConfirmed`.
 - `payment.transaction.partially_refunded.v1` / `.dispute_opened.v1` / `.chargeback_received.v1` → `markPaymentIncident(orderId, 'PARTIALLY_REFUNDED' | 'DISPUTED' | 'CHARGEBACK')`: mirrors the signal onto `Order.paymentIncident` (a plain idempotent `update`, no outbox event — nothing else reacts to order-service's own copy, only to payment-service's original topics, see that service's CLAUDE.md).
+- `payment.transaction.dispute_resolved.v1` → `clearPaymentIncident(orderId)`: resets `Order.paymentIncident` back to `null`, same idea as the clear inside `markRefunded()` but as its own method since a dispute resolving doesn't imply a refund.
+- `payment.transaction.authorization_failed.v1` / `.voided.v1` → `cancelOrder(orderId)`: CREATED → CANCELLED, idempotent (no-op once already past CREATED — same `pessimistic_write` locking as `markConfirmed`/`markRefunded`). Without this, an order whose payment never actually completed sat at `CREATED` forever with no way out.
 
 ### Computed `paymentStatus` incorporates `paymentIncident`
 

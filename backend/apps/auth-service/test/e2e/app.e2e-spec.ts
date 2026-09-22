@@ -34,6 +34,18 @@ describe('AuthController (e2e)', () => {
       .send({ email, password, name: 'E2E User' })
       .expect(201);
     expect(registerRes.body).toMatchObject({ email, name: 'E2E User' });
+    expect(registerRes.body.accessToken).toEqual(expect.any(String));
+    expect(registerRes.body.refreshToken).toEqual(expect.any(String));
+
+    // Registering logs the user in immediately, same as /auth/login — no
+    // separate login call needed before hitting a guarded endpoint.
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${registerRes.body.accessToken}`)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body).toMatchObject({ email, name: 'E2E User' });
+      });
 
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')

@@ -14,6 +14,11 @@ export class Transaction {
   @Column({ name: 'user_id' })
   userId!: string;
 
+  /** Set only for a Transaction that charges one bnpl-service Installment rather than the order's original payment — see `PaymentsService.chargeInstallment()`. */
+  @Index()
+  @Column({ name: 'installment_id', type: 'varchar', nullable: true })
+  installmentId!: string | null;
+
   @Column({ name: 'amount_cents', type: 'int' })
   amountCents!: number;
 
