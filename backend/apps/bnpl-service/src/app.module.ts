@@ -1,7 +1,9 @@
 import { KafkaModule } from '@bnpl/kafka-client';
 import { CorrelationIdMiddleware, ObservabilityLoggerModule } from '@bnpl/observability';
+import { RabbitMqModule } from '@bnpl/rabbitmq-client';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BnplModule } from './bnpl/bnpl.module';
 import { HealthModule } from './health/health.module';
@@ -29,6 +31,8 @@ import { HealthModule } from './health/health.module';
       groupId: 'bnpl-service',
       brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(','),
     }),
+    RabbitMqModule.forRoot({ url: process.env.RABBITMQ_URL ?? 'amqp://bnpl:bnpl@localhost:5672' }),
+    ScheduleModule.forRoot(),
     BnplModule,
     HealthModule,
   ],

@@ -6,6 +6,7 @@ import { TransactionStatusHistory } from './entities/transaction-status-history.
 import { Transaction } from './entities/transaction.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { FakePaymentGateway } from './gateways/fake-payment.gateway';
+import { InstallmentChargeConsumer } from './installment-charge.consumer';
 import { PAYMENT_GATEWAY } from './ports/payment-gateway.port';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
@@ -21,6 +22,7 @@ import { WebhooksController } from './webhooks.controller';
   providers: [
     PaymentsService,
     WebhookProcessorConsumer,
+    InstallmentChargeConsumer,
     FakePaymentGateway,
     {
       provide: PAYMENT_GATEWAY,

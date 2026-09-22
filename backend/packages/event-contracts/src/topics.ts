@@ -20,6 +20,8 @@ export const KafkaTopics = {
     disputeOpened: 'payment.transaction.dispute_opened.v1',
     chargebackReceived: 'payment.transaction.chargeback_received.v1',
     cancelled: 'payment.transaction.cancelled.v1',
+    installmentChargeCaptured: 'payment.installment_charge.captured.v1',
+    installmentChargeFailed: 'payment.installment_charge.capture_failed.v1',
   },
   bnpl: {
     planCreated: 'bnpl.installment_plan.created.v1',
