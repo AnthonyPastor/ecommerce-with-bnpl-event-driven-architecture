@@ -80,8 +80,11 @@ This guarantees that every event Kafka ends up seeing corresponds to a change th
 | `payment.transaction.dispute_opened.v1` | payment-service | order-service (mirrors the signal onto the order's payment status) |
 | `payment.transaction.dispute_resolved.v1` | payment-service | order-service (clears the payment-incident signal), bnpl-service (takes the plan off `DISPUTED_HOLD`) |
 | `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag), order-service (mirrors the signal onto the order's payment status) |
+| `payment.installment_charge.captured.v1` / `.capture_failed.v1` | payment-service | bnpl-service (marks the installment `PAID`, or retries/`DEFAULTED`s it) |
 | `bnpl.installment_plan.created.v1` / `.activated.v1` / `.adjusted.v1` / `.cancelled.v1` | bnpl-service | — |
-| `bnpl.installment.due.v1` / `.paid.v1` / `.overdue.v1` / `.defaulted.v1` | bnpl-service (defined) | notification-service (`due.v1`) |
+| `bnpl.installment.due.v1` | bnpl-service | notification-service (email) |
+| `bnpl.installment.paid.v1` / `.defaulted.v1` | bnpl-service | — |
+| `bnpl.installment.overdue.v1` | — (defined, unused — `PENDING`/`DUE`/retry cover this today, see flow #5) | — |
 | `cart.cart.checked_out.v1` | — (deferred; see below) | — |
 | `auth.user.registered.v1` | — (deferred) | — |
 
@@ -95,7 +98,7 @@ Naming: `<domain>.<entity>.<event>.v1`.
 |---|---|---|---|
 | `q.notifications.email.send` | notification-service (from the Kafka→RabbitMQ bridge) | notification-service | Decouples sending an email from translating the event. |
 | `q.payments.webhook.process` | payment-service (`WebhooksController`) | payment-service (`WebhookProcessorConsumer`) | Don't block the HTTP response to the payment gateway while writing to the DB. |
-| `q.payments.charge_installment` | — (defined, no publisher yet) | — | See "Known gaps" below. |
+| `q.payments.charge_installment` | bnpl-service (`ChargeDueInstallmentUseCase`) | payment-service (`InstallmentChargeConsumer`) | Decouples finding a due installment from actually charging it. |
 | `q.documents.generate_contract` | — (defined, no flow yet) | — | Reserved. |
 
 ### Correlation ID vs. Transaction ID
@@ -283,6 +286,43 @@ a different method for each.
 
 `notification-service` separates *translating* the domain event (Kafka → `email.send` command, no retry, pure and testable logic) from *delivering* it (a RabbitMQ consumer with retry/DLQ that calls `EmailProviderPort`). This keeps the event→email mapping decoupled from retry/delivery concerns.
 
+### 5. Installment charging ("dunning"): poll → command → charge → react
+
+The only scheduled (not reactive) flow in the system — `bnpl-service`'s `InstallmentPollerService` runs `PollDueInstallmentsUseCase` hourly, finding every `Installment` in `PENDING`/`DUE` whose `dueDate` has passed.
+
+```mermaid
+sequenceDiagram
+    participant Cron as InstallmentPollerService
+    participant Bnpl as bnpl-service
+    participant MQ as RabbitMQ
+    participant Payment as payment-service
+    participant Gateway as FakePaymentGateway
+
+    Cron--)Bnpl: hourly tick
+    Bnpl->>Bnpl: PollDueInstallmentsUseCase<br/>find PENDING/DUE, dueDate <= now
+    loop each due installment
+        Bnpl->>Bnpl: ChargeDueInstallmentUseCase<br/>PENDING -> DUE (outbox bnpl.installment.due.v1)
+        Bnpl--)MQ: publish payment.charge_installment
+    end
+
+    MQ--)Payment: InstallmentChargeConsumer
+    Payment->>Gateway: authorize()
+    Payment->>Payment: chargeInstallment()<br/>new Transaction(installmentId), PENDING -> AUTHORIZED
+    Gateway--)Gateway: schedule webhook (~2s delay)
+    Gateway->>Payment: POST /webhooks/payments/fake
+    Payment--)MQ: publish webhook.payment.process
+    MQ--)Payment: WebhookProcessorConsumer
+    Payment->>Payment: AUTHORIZED -> CAPTURED (or CAPTURE_FAILED)
+    Note right of Payment: Kafka: payment.installment_charge.captured.v1<br/>(or .capture_failed.v1) — NOT the generic<br/>payment.transaction.captured.v1, so order-service/<br/>bnpl-service's original-payment reactions don't fire
+
+    Payment--)Bnpl: payment.installment_charge.captured.v1
+    Bnpl->>Bnpl: MarkInstallmentPaidUseCase -> PAID
+    Payment--)Bnpl: payment.installment_charge.capture_failed.v1
+    Bnpl->>Bnpl: MarkInstallmentFailedUseCase<br/>retryCount < 3: PENDING, dueDate += 3d<br/>retryCount >= 3: DEFAULTED + CreditProfile.blocked
+```
+
+An installment charge is its own `Transaction` row in payment-service (`installmentId` set, `orderId` shared with the order's original — now-terminal-only-in-the-sense-of-being-`CAPTURED`-forever — `Transaction`), going through the exact same state machine and `PaymentGatewayPort`. The two new topics exist specifically so bnpl-service's existing `PaymentEventsConsumer` (which reacts to the generic `payment.transaction.captured.v1` by re-activating a plan) never gets confused about which "capture" just happened. `retryCount`/`InstallmentStatus.DEFAULTED`/`CreditProfile.blocked` — all present in the schema since the beginning but unused until this flow — are now exercised: 3 failed charge attempts per installment before it defaults, 3 days between retries, and a default blocks the user from future plans without touching their other installments.
+
 ## Repository pattern (swappable external providers)
 
 Each external integration is an abstract class (contract) + a DI token + a fake implementation, selected by an environment variable in a factory provider — switching to a real provider never touches consumer code:
@@ -295,7 +335,6 @@ Each external integration is an abstract class (contract) + a DI token + a fake 
 
 ## Known gaps (deliberately deferred, not bugs)
 
-- **Installment charging ("dunning")**: `bnpl-service` creates `Installment`s with real due dates, but there's no job that charges them when due. The `q.payments.charge_installment` queue is defined but nothing publishes/consumes it yet. See `apps/bnpl-service/CLAUDE.md`.
 - **`cart.cart.checked_out.v1`** and **`auth.user.registered.v1`**: topics defined in the catalog, no publisher yet.
 - **notification-service uses `userId` as the "destination email"**: no consumed domain event carries a real email address, only `userId`. See `apps/notification-service/CLAUDE.md`.
 

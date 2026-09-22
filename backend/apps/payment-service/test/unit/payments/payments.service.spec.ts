@@ -299,6 +299,107 @@ describe('PaymentsService.processWebhookEvent', () => {
       expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
     );
   });
+
+  it('publishes the installment-specific captured topic for a transaction that charges an installment', async () => {
+    const { service, queryRunner } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.AUTHORIZED,
+      orderId: 'order-1',
+      userId: 'user-1',
+      installmentId: 'installment-1',
+      amountCents: 3333,
+      currency: 'USD',
+    });
+
+    await service.processWebhookEvent('txn-1', {
+      externalEventId: 'evt-1',
+      gatewayReference: 'fake_txn-1',
+      eventType: 'capture_succeeded',
+      amountCents: 3333,
+    });
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'payment.installment_charge.captured.v1' }),
+    );
+  });
+
+  it('publishes the installment-specific capture-failed topic for a transaction that charges an installment', async () => {
+    const { service, queryRunner } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.AUTHORIZED,
+      orderId: 'order-1',
+      userId: 'user-1',
+      installmentId: 'installment-1',
+    });
+
+    await service.processWebhookEvent('txn-1', {
+      externalEventId: 'evt-1',
+      gatewayReference: 'fake_txn-1',
+      eventType: 'capture_failed',
+    });
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'payment.installment_charge.capture_failed.v1' }),
+    );
+  });
+});
+
+describe('PaymentsService.chargeInstallment', () => {
+  it('creates a PENDING transaction tagged with installmentId, authorizes it, and transitions to AUTHORIZED', async () => {
+    const { service, gateway, queryRunner } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.PENDING,
+      orderId: 'order-1',
+    });
+
+    const result = await service.chargeInstallment({
+      installmentId: 'installment-1',
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 3333,
+      currency: 'USD',
+    });
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: PaymentStatus.PENDING, installmentId: 'installment-1' }),
+    );
+    expect(gateway.authorize).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 3333, currency: 'USD' }));
+    expect(result?.status).toBe(PaymentStatus.AUTHORIZED);
+  });
+
+  it('is a safe no-op (returns null) when the installment already has an in-flight charge', async () => {
+    const { service } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [{ id: 'txn-0', status: PaymentStatus.AUTHORIZED, orderId: 'order-1', installmentId: 'installment-1' }],
+    );
+
+    const result = await service.chargeInstallment({
+      installmentId: 'installment-1',
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 3333,
+      currency: 'USD',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('allows a retry when the installment last failed', async () => {
+    const { service } = makeService(
+      { id: 'txn-1', status: PaymentStatus.PENDING, orderId: 'order-1' },
+      [{ id: 'txn-0', status: PaymentStatus.AUTHORIZATION_FAILED, orderId: 'order-1', installmentId: 'installment-1' }],
+    );
+
+    const result = await service.chargeInstallment({
+      installmentId: 'installment-1',
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 3333,
+      currency: 'USD',
+    });
+
+    expect(result?.status).toBe(PaymentStatus.AUTHORIZED);
+  });
 });
 
 describe('PaymentsService.findById', () => {
