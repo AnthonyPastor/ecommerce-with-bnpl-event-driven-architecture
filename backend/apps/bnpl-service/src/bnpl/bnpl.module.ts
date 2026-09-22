@@ -13,6 +13,7 @@ import { CancelInstallmentPlanUseCase } from './use-cases/cancel-installment-pla
 import { GetInstallmentPlanUseCase } from './use-cases/get-installment-plan.use-case';
 import { HoldInstallmentPlanUseCase } from './use-cases/hold-installment-plan.use-case';
 import { ListInstallmentPlansUseCase } from './use-cases/list-installment-plans.use-case';
+import { ResumeInstallmentPlanUseCase } from './use-cases/resume-installment-plan.use-case';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ListInstallmentPlansUseCase } from './use-cases/list-installment-plans.
     CancelInstallmentPlanUseCase,
     AdjustInstallmentPlanUseCase,
     HoldInstallmentPlanUseCase,
+    ResumeInstallmentPlanUseCase,
     GetInstallmentPlanUseCase,
     ListInstallmentPlansUseCase,
   ],

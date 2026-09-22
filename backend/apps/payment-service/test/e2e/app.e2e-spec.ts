@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { KafkaTopics } from '@bnpl/event-contracts';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
 import { Kafka } from 'kafkajs';
 import request from 'supertest';
+import { Transaction } from '../../src/payments/entities/transaction.entity';
 
 const E2E_PORT = 3015;
 
@@ -236,5 +238,28 @@ describe('PaymentsController (e2e)', () => {
       .post(`/payments/${transactionId}/simulate-chargeback`)
       .expect(201);
     expect(res.body.status).toBe('CHARGEBACK');
+  });
+
+  it('POST /payments/:id/resolve-dispute drives DISPUTED -> CAPTURED', async () => {
+    const transactionId = await createAndWaitForCapture('user-dispute-resolved', 1000);
+
+    // simulate-chargeback fuses CAPTURED -> DISPUTED -> CHARGEBACK into one
+    // call (real chargebacks are card-network-initiated, not a two-step
+    // merchant flow — see payment-service/CLAUDE.md), so there's no public
+    // endpoint that leaves a transaction sitting at DISPUTED. Force it there
+    // directly to exercise resolve-dispute's own transition end-to-end.
+    const transactions = app.get(getRepositoryToken(Transaction));
+    await transactions.update({ id: transactionId }, { status: 'DISPUTED' });
+
+    const res = await request(app.getHttpServer())
+      .post(`/payments/${transactionId}/resolve-dispute`)
+      .expect(201);
+    expect(res.body.status).toBe('CAPTURED');
+  });
+
+  it('POST /payments/:id/resolve-dispute rejects a transaction that is not DISPUTED', async () => {
+    const transactionId = await createAndWaitForCapture('user-dispute-rejected', 1000);
+
+    await request(app.getHttpServer()).post(`/payments/${transactionId}/resolve-dispute`).expect(400);
   });
 });

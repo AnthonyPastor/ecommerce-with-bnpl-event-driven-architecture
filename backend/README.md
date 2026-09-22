@@ -76,6 +76,7 @@ This guarantees that every event Kafka ends up seeing corresponds to a change th
 | `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan), order-service (mirrors the signal onto the order's payment status) |
 | `payment.transaction.refunded.v1` | payment-service | order-service (marks the order `REFUNDED`), bnpl-service (cancels the plan), notification-service (email) |
 | `payment.transaction.dispute_opened.v1` | payment-service | order-service (mirrors the signal onto the order's payment status) |
+| `payment.transaction.dispute_resolved.v1` | payment-service | order-service (clears the payment-incident signal), bnpl-service (takes the plan off `DISPUTED_HOLD`) |
 | `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag), order-service (mirrors the signal onto the order's payment status) |
 | `bnpl.installment_plan.created.v1` / `.activated.v1` / `.adjusted.v1` / `.cancelled.v1` | bnpl-service | — |
 | `bnpl.installment.due.v1` / `.paid.v1` / `.overdue.v1` / `.defaulted.v1` | bnpl-service (defined) | notification-service (`due.v1`) |
@@ -109,7 +110,9 @@ the system — every transition is validated by `assertTransition()` against
 `PAYMENT_TRANSITIONS` (`packages/event-contracts/src/enums.ts`) and persisted
 atomically with its outbox event by `PaymentsService`'s private
 `applyTransition()`. `CANCELLED` is a defined-but-currently-unreachable edge
-(no code path produces it yet) — shown for completeness.
+(no code path produces it yet) — shown for completeness. `DISPUTED →
+CAPTURED` (a dispute resolved in the merchant's favor) is reachable via
+`POST /payments/:id/resolve-dispute` — see flow #3 below.
 
 ```mermaid
 stateDiagram-v2
@@ -255,6 +258,13 @@ a different method for each.
   `Order.paymentIncident` (`markPaymentIncident`), so the order's computed
   payment status reflects `DISPUTED`/`CHARGEBACK` instead of staying at
   whatever it was when the order was last confirmed.
+- **Dispute resolved** (`POST /payments/:id/resolve-dispute`, requires
+  `DISPUTED`): the mirror image of opening a dispute — the card network
+  ruled in the merchant's favor, so this also bypasses `PaymentGatewayPort`
+  and fires a single direct transition, `DISPUTED → CAPTURED`
+  (`dispute_resolved.v1`). `bnpl-service` reacts by taking the plan off
+  `DISPUTED_HOLD` back to `ACTIVE`; `order-service` clears
+  `Order.paymentIncident` back to `null`, the same way a full refund does.
 - **Authorization failure**: if the synchronous `PaymentGatewayPort.authorize()`
   call in `createPayment()` throws, `applyTransition(AUTHORIZATION_FAILED)`
   still runs (outbox → `payment.transaction.authorization_failed.v1`) before

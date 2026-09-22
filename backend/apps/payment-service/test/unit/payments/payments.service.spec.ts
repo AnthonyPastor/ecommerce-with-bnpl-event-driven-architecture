@@ -468,3 +468,28 @@ describe('PaymentsService.simulateChargeback', () => {
     await expect(service.simulateChargeback('txn-1')).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('PaymentsService.resolveDispute', () => {
+  it('drives DISPUTED -> CAPTURED without touching the gateway', async () => {
+    const { service, gateway, getCurrent } = makeService({
+      id: 'txn-1',
+      status: PaymentStatus.DISPUTED,
+      orderId: 'order-1',
+      userId: 'user-1',
+      amountCents: 1000,
+      currency: 'USD',
+    });
+
+    const result = await service.resolveDispute('txn-1');
+
+    expect(result.status).toBe(PaymentStatus.CAPTURED);
+    expect(getCurrent().status).toBe(PaymentStatus.CAPTURED);
+    expect(gateway.refund).not.toHaveBeenCalled();
+    expect(gateway.void).not.toHaveBeenCalled();
+  });
+
+  it('rejects resolving a dispute on a transaction that is not DISPUTED', async () => {
+    const { service } = makeService({ id: 'txn-1', status: PaymentStatus.CAPTURED });
+    await expect(service.resolveDispute('txn-1')).rejects.toThrow(BadRequestException);
+  });
+});

@@ -273,4 +273,17 @@ export class OrdersService {
       throw new NotFoundException(`Order ${orderId} not found`);
     }
   }
+
+  /**
+   * Reaction to `payment.transaction.dispute_resolved.v1`: a dispute that
+   * was resolved in the merchant's favor supersedes the `DISPUTED` signal
+   * `markPaymentIncident` recorded, same idea as `markRefunded` clearing it
+   * for a full refund.
+   */
+  async clearPaymentIncident(orderId: string): Promise<void> {
+    const result = await this.orders.update({ id: orderId }, { paymentIncident: null });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Order ${orderId} not found`);
+    }
+  }
 }
