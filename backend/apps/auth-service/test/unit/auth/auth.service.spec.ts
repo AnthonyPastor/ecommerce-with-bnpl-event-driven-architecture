@@ -57,10 +57,10 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('hashes the password and creates the user', async () => {
+    it('hashes the password, creates the user, and logs them in like login() does', async () => {
       users.findOne.mockResolvedValue(null);
 
-      const user = await service.register({
+      const { user, tokens } = await service.register({
         email: 'new@user.com',
         password: 'plaintext-pw',
         name: 'New User',
@@ -69,6 +69,14 @@ describe('AuthService', () => {
       expect(user.email).toBe('new@user.com');
       expect(user.passwordHash).not.toBe('plaintext-pw');
       expect(await bcrypt.compare('plaintext-pw', user.passwordHash)).toBe(true);
+      expect(tokens).toEqual({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: 900,
+      });
+      expect(refreshTokens.save).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'generated-id', revokedAt: null }),
+      );
     });
 
     it('rejects a duplicate email', async () => {
