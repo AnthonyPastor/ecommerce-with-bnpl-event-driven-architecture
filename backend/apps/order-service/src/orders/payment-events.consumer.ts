@@ -19,6 +19,7 @@ export class PaymentEventsConsumer implements OnModuleInit {
         KafkaTopics.payment.captured,
         KafkaTopics.payment.partiallyRefunded,
         KafkaTopics.payment.disputeOpened,
+        KafkaTopics.payment.disputeResolved,
         KafkaTopics.payment.chargebackReceived,
         KafkaTopics.payment.authorizationFailed,
         KafkaTopics.payment.voided,
@@ -56,6 +57,9 @@ export class PaymentEventsConsumer implements OnModuleInit {
           break;
         case KafkaTopics.payment.disputeOpened:
           await this.ordersService.markPaymentIncident(payload.orderId, 'DISPUTED');
+          break;
+        case KafkaTopics.payment.disputeResolved:
+          await this.ordersService.clearPaymentIncident(payload.orderId);
           break;
         case KafkaTopics.payment.chargebackReceived:
           await this.ordersService.markPaymentIncident(payload.orderId, 'CHARGEBACK');

@@ -6,6 +6,7 @@ import { AdjustInstallmentPlanUseCase } from './use-cases/adjust-installment-pla
 import { CancelInstallmentPlanUseCase } from './use-cases/cancel-installment-plan.use-case';
 import { HoldInstallmentPlanUseCase } from './use-cases/hold-installment-plan.use-case';
 import { PaymentEventPayload } from './use-cases/payment-event-payload';
+import { ResumeInstallmentPlanUseCase } from './use-cases/resume-installment-plan.use-case';
 
 @Injectable()
 export class PaymentEventsConsumer implements OnModuleInit {
@@ -17,6 +18,7 @@ export class PaymentEventsConsumer implements OnModuleInit {
     private readonly cancelPlan: CancelInstallmentPlanUseCase,
     private readonly adjustPlan: AdjustInstallmentPlanUseCase,
     private readonly holdPlan: HoldInstallmentPlanUseCase,
+    private readonly resumePlan: ResumeInstallmentPlanUseCase,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -26,6 +28,7 @@ export class PaymentEventsConsumer implements OnModuleInit {
         KafkaTopics.payment.refunded,
         KafkaTopics.payment.partiallyRefunded,
         KafkaTopics.payment.chargebackReceived,
+        KafkaTopics.payment.disputeResolved,
       ],
       (envelope) => this.handle(envelope),
       'bnpl-service',
@@ -43,6 +46,8 @@ export class PaymentEventsConsumer implements OnModuleInit {
         return this.adjustPlan.execute({ payload, eventId: envelope.eventId });
       case KafkaTopics.payment.chargebackReceived:
         return this.holdPlan.execute(payload);
+      case KafkaTopics.payment.disputeResolved:
+        return this.resumePlan.execute(payload);
       default:
         this.logger.warn(`Unhandled event type: ${envelope.eventType}`);
     }
