@@ -71,6 +71,9 @@ export const api = {
       token,
     }),
 
+  voidPayment: (token: string, transactionId: string) =>
+    request<{ status: string }>(`/payments/${transactionId}/void`, { method: 'POST', token }),
+
   getInstallmentPlans: (token: string, orderId: string) =>
     request<Array<{ id: string; status: string; installments: Array<{ status: string; amountCents: number }> }>>(
       `/installment-plans?orderId=${orderId}`,

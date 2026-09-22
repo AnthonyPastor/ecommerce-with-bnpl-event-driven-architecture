@@ -237,3 +237,26 @@ describe('OrdersService.markRefunded', () => {
     expect(queryRunner.manager.save).not.toHaveBeenCalled();
   });
 });
+
+describe('OrdersService.cancelOrder', () => {
+  it('transitions a CREATED order to CANCELLED and writes the outbox event', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CREATED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.cancelOrder('order-1');
+
+    expect(queryRunner.manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'CANCELLED' }),
+    );
+    expect(queryRunner.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('is idempotent: does nothing if the order already moved past CREATED', async () => {
+    const { queryRunner } = makeFakeQueryRunner({ id: 'order-1', status: 'CONFIRMED', userId: 'user-1' });
+    const { service } = makeService({ queryRunner });
+
+    await service.cancelOrder('order-1');
+
+    expect(queryRunner.manager.save).not.toHaveBeenCalled();
+  });
+});
