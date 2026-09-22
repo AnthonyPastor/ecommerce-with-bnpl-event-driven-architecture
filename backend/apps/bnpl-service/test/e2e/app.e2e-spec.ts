@@ -46,6 +46,7 @@ describe('BnplController (e2e)', () => {
     'consuming payment.transaction.captured.v1 creates an ACTIVE plan with 3 installments summing the total',
     async () => {
       const orderId = `order-${randomUUID()}`;
+      const userId = `user-${randomUUID()}`;
       const transactionId = randomUUID();
       const correlationId = `corr-${randomUUID()}`;
 
@@ -59,7 +60,7 @@ describe('BnplController (e2e)', () => {
         payload: {
           transactionId,
           orderId,
-          userId: 'user-1',
+          userId,
           amountCents: 3000,
           currency: 'USD',
         },
@@ -85,7 +86,7 @@ describe('BnplController (e2e)', () => {
 
       expect(plans).toHaveLength(1);
       const [plan] = plans;
-      expect(plan).toMatchObject({ orderId, userId: 'user-1', status: 'ACTIVE', totalCents: 3000 });
+      expect(plan).toMatchObject({ orderId, userId, status: 'ACTIVE', totalCents: 3000 });
       expect(plan.installments).toHaveLength(3);
       const sum = plan.installments.reduce((acc: number, i: any) => acc + i.amountCents, 0);
       expect(sum).toBe(3000);
@@ -120,11 +121,11 @@ describe('BnplController (e2e)', () => {
     await producer.disconnect();
   }
 
-  async function createActivePlan(orderId: string): Promise<void> {
+  async function createActivePlan(orderId: string, userId: string): Promise<void> {
     await publishSyntheticEvent(KafkaTopics.payment.captured, randomUUID(), orderId, {
       transactionId: randomUUID(),
       orderId,
-      userId: 'user-1',
+      userId,
       amountCents: 3000,
       currency: 'USD',
     });
@@ -141,7 +142,8 @@ describe('BnplController (e2e)', () => {
     'the hourly poller marks a due installment DUE and publishes bnpl.installment.due.v1',
     async () => {
       const orderId = `order-${randomUUID()}`;
-      await createActivePlan(orderId);
+      const userId = `user-${randomUUID()}`;
+      await createActivePlan(orderId, userId);
 
       const plansRes = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
       const firstInstallmentId = plansRes.body[0].installments[0].id;
@@ -165,7 +167,8 @@ describe('BnplController (e2e)', () => {
     'three consecutive installment_charge.capture_failed.v1 events DEFAULT the installment and block the credit profile',
     async () => {
       const orderId = `order-${randomUUID()}`;
-      await createActivePlan(orderId);
+      const userId = `user-${randomUUID()}`;
+      await createActivePlan(orderId, userId);
 
       const plansRes = await request(app.getHttpServer()).get(`/installment-plans?orderId=${orderId}`).expect(200);
       const installmentId = plansRes.body[0].installments[0].id;
@@ -175,7 +178,7 @@ describe('BnplController (e2e)', () => {
           transactionId: randomUUID(),
           installmentId,
           orderId,
-          userId: 'user-1',
+          userId,
         });
 
         const expectedStatus = attempt < 3 ? InstallmentStatus.PENDING : InstallmentStatus.DEFAULTED;
@@ -190,7 +193,7 @@ describe('BnplController (e2e)', () => {
       }
 
       const creditProfiles = app.get(getRepositoryToken(CreditProfile));
-      const profile = await creditProfiles.findOne({ where: { userId: 'user-1' } });
+      const profile = await creditProfiles.findOne({ where: { userId } });
       expect(profile?.blocked).toBe(true);
     },
     30000,
