@@ -71,7 +71,7 @@ This guarantees that every event Kafka ends up seeing corresponds to a change th
 | `order.order.cancelled.v1` | order-service | — (defined, no flow triggers it yet) |
 | `order.order.refunded.v1` | order-service | — |
 | `payment.transaction.authorized.v1` / `.captured.v1` | payment-service | bnpl-service (captured → activates the installment plan), order-service (captured → confirms the order, emits `order.order.confirmed.v1`) |
-| `payment.transaction.authorization_failed.v1` / `.capture_failed.v1` | payment-service | — |
+| `payment.transaction.authorization_failed.v1` / `.capture_failed.v1` | payment-service | notification-service (email) |
 | `payment.transaction.voided.v1` / `.cancelled.v1` | payment-service | — |
 | `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan), order-service (mirrors the signal onto the order's payment status) |
 | `payment.transaction.refunded.v1` | payment-service | order-service (marks the order `REFUNDED`), bnpl-service (cancels the plan), notification-service (email) |
