@@ -41,6 +41,10 @@ Local infra (Postgres) is started via `docker compose -f backend/infra/docker-co
 
 `AuthService` (`src/auth/auth.service.ts`) owns everything the port intentionally does *not*: it persists a hash (SHA-256, not the raw token) of each issued refresh token in the `refresh_tokens` table so tokens can be revoked/rotated and reuse detected. On `refresh()`, the old row is marked revoked in the same call that issues + persists the new one; a second attempt to use an already-revoked refresh token fails with 401. This split (port = crypto only, service = persistence/revocation) is deliberate — keep new logic on the correct side of it.
 
+### `register()` logs the user in, same as `login()`
+
+`register()` calls the same private `issueTokenPair()` that `login()` uses and returns `{ user, tokens }`; `AuthController.register()` flattens that into `{ id, email, name, accessToken, refreshToken, expiresIn }`. A newly registered user never has to make a separate `/auth/login` call to get a session — mirror this if you add another account-creation entry point (e.g. OAuth signup) later.
+
 ### Request correlation
 
 `AppModule` applies `CorrelationIdMiddleware` (from `@bnpl/observability`) globally in `configure()`. It reads/generates `x-correlation-id` and stores it in an `AsyncLocalStorage`-backed `RequestContextService`, which `nestjs-pino` reads via a `mixin()` to stamp every log line automatically — you never need to thread correlationId through method signatures manually.
