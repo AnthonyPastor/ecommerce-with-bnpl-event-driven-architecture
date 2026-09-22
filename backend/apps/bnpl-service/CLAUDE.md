@@ -44,7 +44,7 @@ Subscribes to five Kafka topics with one handler via `KafkaConsumerService.subsc
 - `payment.transaction.chargeback_received.v1` → `HoldInstallmentPlanUseCase`: plan → `DISPUTED_HOLD`, `CreditProfile.needsRescoring = true`. No new domain event — this one is a pure internal state change, so no outbox write, just the plan+lock/guard for idempotency.
 - `payment.transaction.dispute_resolved.v1` → `ResumeInstallmentPlanUseCase`: plan `DISPUTED_HOLD` → `ACTIVE`. Same idempotency idiom as the hold, and also no outbox write — doesn't touch `CreditProfile.needsRescoring`, that flag is resolved by the rescoring flow itself, not by this transition.
 
-All four reuse the same `saveWithOutbox` transactional-outbox pattern as `order-service` (see that service's CLAUDE.md for the pattern itself).
+The first three reuse the same `saveWithOutbox` transactional-outbox pattern as `order-service` (see that service's CLAUDE.md for the pattern itself); the hold/resume pair are pure internal state changes with no outbox write, as each bullet above notes.
 
 ### Known gap: installments never actually get charged after creation
 
