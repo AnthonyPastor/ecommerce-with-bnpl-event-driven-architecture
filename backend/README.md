@@ -299,7 +299,7 @@ sequenceDiagram
     participant Gateway as FakePaymentGateway
 
     Cron--)Bnpl: hourly tick
-    Bnpl->>Bnpl: PollDueInstallmentsUseCase<br/>find PENDING/DUE, dueDate <= now
+    Bnpl->>Bnpl: PollDueInstallmentsUseCase<br/>find PENDING/DUE with dueDate already passed
     loop each due installment
         Bnpl->>Bnpl: ChargeDueInstallmentUseCase<br/>PENDING -> DUE (outbox bnpl.installment.due.v1)
         Bnpl--)MQ: publish payment.charge_installment
@@ -318,7 +318,7 @@ sequenceDiagram
     Payment--)Bnpl: payment.installment_charge.captured.v1
     Bnpl->>Bnpl: MarkInstallmentPaidUseCase -> PAID
     Payment--)Bnpl: payment.installment_charge.capture_failed.v1
-    Bnpl->>Bnpl: MarkInstallmentFailedUseCase<br/>retryCount < 3: PENDING, dueDate += 3d<br/>retryCount >= 3: DEFAULTED + CreditProfile.blocked
+    Bnpl->>Bnpl: MarkInstallmentFailedUseCase<br/>retryCount under 3: PENDING, dueDate += 3d<br/>retryCount at 3: DEFAULTED + CreditProfile.blocked
 ```
 
 An installment charge is its own `Transaction` row in payment-service (`installmentId` set, `orderId` shared with the order's original — now-terminal-only-in-the-sense-of-being-`CAPTURED`-forever — `Transaction`), going through the exact same state machine and `PaymentGatewayPort`. The two new topics exist specifically so bnpl-service's existing `PaymentEventsConsumer` (which reacts to the generic `payment.transaction.captured.v1` by re-activating a plan) never gets confused about which "capture" just happened. `retryCount`/`InstallmentStatus.DEFAULTED`/`CreditProfile.blocked` — all present in the schema since the beginning but unused until this flow — are now exercised: 3 failed charge attempts per installment before it defaults, 3 days between retries, and a default blocks the user from future plans without touching their other installments.
