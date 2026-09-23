@@ -26,9 +26,9 @@ the client.
 | `auth-service` | 3001 | `auth_db` | Identity: registration, login, JWT access/refresh, session revocation. |
 | `catalog-service` | 3002 | `catalog_db` | Catalog: categories, products, variants. Read-only for the rest of the system. |
 | `cart-service` | 3003 | `cart_db` | Shopping cart and checkout (synchronous call to `order-service`). |
-| `order-service` | 3004 | `order_db` | Orders: creation, and reacting to payment-service's events (confirms, refunds, mirrors dispute/chargeback/partial-refund status). This is where the business `transactionId` is born. |
+| `order-service` | 3004 | `order_db` | Orders: creation, and reacting to payment-service's events (confirms, cancels, refunds, mirrors dispute/chargeback/partial-refund status). This is where the business `transactionId` is born. |
 | `payment-service` | 3005 | `payment_db` | Payment state machine, gateway abstraction, async webhook pipeline. The most complex service. |
-| `bnpl-service` | 3006 | `bnpl_db` | The "buy now, pay later" logic: credit scoring, installment plans, reacting to the payment lifecycle. |
+| `bnpl-service` | 3006 | `bnpl_db` | The "buy now, pay later" logic: credit scoring, installment plans, dunning, reacting to the payment lifecycle. |
 | `notification-service` | 3007 | `notification_db` | Bridges domain events → email (Kafka → RabbitMQ → send). |
 
 Every folder under `apps/` is designed to be extractable into its own repo —
@@ -46,292 +46,28 @@ pnpm --filter catalog-service run seed           # once, with catalog-service up
 
 See the full command reference (tests, build, filters) in [`CLAUDE.md`](./CLAUDE.md).
 
-## Event architecture
+## Architecture
 
-The system deliberately uses **two messaging mechanisms with different guarantees**:
+The deep architectural detail — why two messaging systems, the outbox
+pattern, idempotency, the payment/BNPL state machines — lives in
+[`../docs/`](../docs/) rather than here, to avoid the same content living
+in two places:
 
-- **Kafka = immutable facts.** A domain event (`order.created`, `payment.captured`, etc.) represents something that *already happened* — it's an audit log other services can react to, and from which the system's state could in principle be reconstructed. You never retry "the order" itself — the fact already occurred.
-- **RabbitMQ = commands/tasks.** A "do this" instruction (send an email, process a webhook, charge an installment) that needs retries with backoff and a dead-letter queue if it ultimately fails — work-queue semantics, not log semantics.
+- [**Architecture**](../docs/architecture.md) — service boundaries, the
+  architecture diagram, the repository pattern for external providers.
+- [**Messaging**](../docs/messaging.md) — Kafka vs. RabbitMQ, the full
+  event catalog, the RabbitMQ topology.
+- [**Transactional Outbox**](../docs/transactional-outbox.md) — how a
+  domain write and its Kafka event are published without inconsistency.
+- [**Reliability & Idempotency**](../docs/reliability-idempotency.md) —
+  correlation/transaction ids, idempotency mechanisms, retry/DLQ.
+- [**Payment Lifecycle**](../docs/payment-lifecycle.md) — the `Transaction`
+  state machine, the webhook pipeline, refunds/disputes/chargebacks/void.
+- [**Installment Plans (BNPL)**](../docs/installment-plans.md) — plan
+  creation, the dunning cron, retries and defaults.
 
-### Outbox pattern (how we publish to Kafka without inconsistency)
-
-Publishing directly to Kafka inside a database transaction isn't atomic (the DB and Kafka are two different systems) — if the DB commit fails after publishing, or the publish fails after the commit, the state ends up inconsistent. This is solved with the **outbox pattern** (`@bnpl/outbox`):
-
-1. The service saves the domain entity *and* a row in `outbox_event` in the **same** Postgres transaction (`saveWithOutbox(queryRunner, entity, event)`).
-2. `OutboxPublisherService` (a separate poller, decoupled from the HTTP request) reads unpublished rows and sends them to Kafka.
-
-This guarantees that every event Kafka ends up seeing corresponds to a change that was actually persisted — never the other way around. The reference implementation is `OrdersService.createOrder()` in `apps/order-service`.
-
-### Kafka event catalog (`packages/event-contracts/src/topics.ts`)
-
-| Topic | Producer | Consumers |
-|---|---|---|
-| `order.order.created.v1` | order-service | notification-service |
-| `order.order.confirmed.v1` | order-service | — (defined; consumed by nothing today, but no longer untriggered — see below) |
-| `order.order.cancelled.v1` | order-service | — |
-| `order.order.refunded.v1` | order-service | — |
-| `payment.transaction.authorized.v1` / `.captured.v1` | payment-service | bnpl-service (captured → activates the installment plan), order-service (captured → confirms the order, emits `order.order.confirmed.v1`) |
-| `payment.transaction.authorization_failed.v1` | payment-service | order-service (cancels the order), notification-service (email) |
-| `payment.transaction.capture_failed.v1` | payment-service | notification-service (email) |
-| `payment.transaction.voided.v1` | payment-service | order-service (cancels the order) |
-| `payment.transaction.cancelled.v1` | payment-service | — |
-| `payment.transaction.partially_refunded.v1` | payment-service | bnpl-service (adjusts the plan), order-service (mirrors the signal onto the order's payment status) |
-| `payment.transaction.refunded.v1` | payment-service | order-service (marks the order `REFUNDED`), bnpl-service (cancels the plan), notification-service (email) |
-| `payment.transaction.dispute_opened.v1` | payment-service | order-service (mirrors the signal onto the order's payment status) |
-| `payment.transaction.dispute_resolved.v1` | payment-service | order-service (clears the payment-incident signal), bnpl-service (takes the plan off `DISPUTED_HOLD`) |
-| `payment.transaction.chargeback_received.v1` | payment-service | bnpl-service (puts the plan on hold + rescoring flag), order-service (mirrors the signal onto the order's payment status) |
-| `payment.installment_charge.captured.v1` / `.capture_failed.v1` | payment-service | bnpl-service (marks the installment `PAID`, or retries/`DEFAULTED`s it) |
-| `bnpl.installment_plan.created.v1` / `.activated.v1` / `.adjusted.v1` / `.cancelled.v1` | bnpl-service | — |
-| `bnpl.installment.due.v1` | bnpl-service | notification-service (email) |
-| `bnpl.installment.paid.v1` / `.defaulted.v1` | bnpl-service | — |
-| `bnpl.installment.overdue.v1` | — (defined, unused — `PENDING`/`DUE`/retry cover this today, see flow #5) | — |
-| `cart.cart.checked_out.v1` | — (deferred; see below) | — |
-| `auth.user.registered.v1` | — (deferred) | — |
-
-Naming: `<domain>.<entity>.<event>.v1`.
-
-### RabbitMQ topology (`packages/event-contracts/src/topics.ts` → `RabbitMqTopology`)
-
-`commands` exchange with dedicated routing keys/queues, each with retry + DLQ via `bindRetryTopology()` (`@bnpl/rabbitmq-client`): main queue → `retry.<queue>` (with TTL, dead-lettered back to the main queue) → `dlq.<queue>` once retries are exhausted.
-
-| Queue | Publishes | Consumes | Purpose |
-|---|---|---|---|
-| `q.notifications.email.send` | notification-service (from the Kafka→RabbitMQ bridge) | notification-service | Decouples sending an email from translating the event. |
-| `q.payments.webhook.process` | payment-service (`WebhooksController`) | payment-service (`WebhookProcessorConsumer`) | Don't block the HTTP response to the payment gateway while writing to the DB. |
-| `q.payments.charge_installment` | bnpl-service (`ChargeDueInstallmentUseCase`) | payment-service (`InstallmentChargeConsumer`) | Decouples finding a due installment from actually charging it. |
-| `q.documents.generate_contract` | — (defined, no flow yet) | — | Reserved. |
-
-### Correlation ID vs. Transaction ID
-
-- **`correlationId`**: one per HTTP request. Generated/read by `CorrelationIdMiddleware` (`@bnpl/observability`) in each service, stored in an `AsyncLocalStorage` (`RequestContextService`), automatically injected into every log line (pino `mixin()`) and automatically propagated on outbound HTTP calls (`PropagatingHttpService`) and in Kafka/RabbitMQ message headers. Never passed manually through function parameters.
-- **`transactionId`**: identifies a *business* flow (in practice, always `order.id`) and survives across otherwise-unrelated HTTP requests. `order-service` "creates" it (`requestContext.setTransactionId(order.id)`) right after `createOrder()`. A payment webhook arrives as a brand-new HTTP request (with its own new `correlationId`) — `payment-service` recovers the correct `transactionId` by looking up the `Transaction`/`orderId` row in its own database, **never trusting an inbound header** for this.
-
-This lets you trace a complete business flow (checkout → payment → async webhook → refund) across logs from different services and different HTTP requests, using the same `transactionId`.
-
-## Payment lifecycle
-
-`Transaction.status` (`payment-service`) is the most involved state machine in
-the system — every transition is validated by `assertTransition()` against
-`PAYMENT_TRANSITIONS` (`packages/event-contracts/src/enums.ts`) and persisted
-atomically with its outbox event by `PaymentsService`'s private
-`applyTransition()`. `CANCELLED` is a defined-but-currently-unreachable edge
-(no code path produces it yet) — shown for completeness. `DISPUTED →
-CAPTURED` (a dispute resolved in the merchant's favor) is reachable via
-`POST /payments/:id/resolve-dispute` — see flow #3 below.
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING
-
-    PENDING --> AUTHORIZED
-    PENDING --> AUTHORIZATION_FAILED
-    PENDING --> CANCELLED
-
-    AUTHORIZED --> CAPTURED
-    AUTHORIZED --> CAPTURE_FAILED
-    AUTHORIZED --> VOIDED
-
-    CAPTURED --> PARTIALLY_REFUNDED
-    CAPTURED --> REFUNDED
-    CAPTURED --> DISPUTED
-
-    PARTIALLY_REFUNDED --> PARTIALLY_REFUNDED
-    PARTIALLY_REFUNDED --> REFUNDED
-    PARTIALLY_REFUNDED --> DISPUTED
-
-    DISPUTED --> CHARGEBACK
-    DISPUTED --> CAPTURED
-
-    AUTHORIZATION_FAILED --> [*]
-    CAPTURE_FAILED --> [*]
-    VOIDED --> [*]
-    REFUNDED --> [*]
-    CHARGEBACK --> [*]
-    CANCELLED --> [*]
-```
-
-## Key flows
-
-### 1. Happy path: checkout → payment → async capture → installment plan
-
-Steps 1–2 (order + sync authorization) happen inline in the HTTP request;
-everything from the fake gateway's webhook onward happens asynchronously,
-decoupled from any client request. Dashed arrows are async hops (outbox →
-Kafka, or a command published to RabbitMQ) — solid arrows are synchronous
-calls that block on a response.
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Order as order-service
-    participant Payment as payment-service
-    participant Gateway as FakePaymentGateway
-    participant MQ as RabbitMQ
-    participant Bnpl as bnpl-service
-
-    Client->>Order: POST /orders
-    Order->>Order: createOrder()<br/>saveWithOutbox(Order + outbox_event)
-    Order-->>Client: 201 { status: CREATED }
-    Order--)Bnpl: (Kafka, async) order.order.created.v1
-
-    Client->>Payment: POST /payments
-    Payment->>Gateway: authorize()
-    Gateway-->>Payment: gatewayReference
-    Payment->>Payment: applyTransition(PENDING → AUTHORIZED)
-    Payment-->>Client: 201 { status: AUTHORIZED }
-    Note right of Payment: Kafka (async, via outbox):<br/>payment.transaction.authorized.v1
-
-    Gateway--)Gateway: schedule webhook (~2s delay)
-    Gateway->>Payment: POST /webhooks/payments/fake
-    Payment->>Payment: verify signature +<br/>idempotency check (WebhookEvent)
-    Payment-->>Gateway: 200 { received: true }
-    Payment--)MQ: publish webhook.payment.process
-
-    MQ--)Payment: WebhookProcessorConsumer
-    Payment->>Payment: processWebhookEvent()<br/>applyTransition(AUTHORIZED → CAPTURED)
-    Note right of Payment: Kafka (async, via outbox):<br/>payment.transaction.captured.v1
-
-    Payment--)Bnpl: (Kafka, async) payment.transaction.captured.v1
-    Bnpl->>Bnpl: activatePlanForCapturedPayment()<br/>creates InstallmentPlan + 3 Installments
-```
-
-The HTTP → RabbitMQ → DB indirection on the webhook exists so we don't block
-the response to the payment gateway while writing to the database, and to
-get retries for free if the write fails.
-
-### 2. Refund (full or partial) — fan-out to three services
-
-Triggered the same way as capture: `PaymentGatewayPort.refund()` schedules
-another async webhook on the fake gateway. Which topic gets published, and
-who reacts to it, depends on whether the refunded amount covers the full
-transaction.
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Payment as payment-service
-    participant Gateway as FakePaymentGateway
-    participant MQ as RabbitMQ
-    participant Order as order-service
-    participant Bnpl as bnpl-service
-    participant Notif as notification-service
-
-    Client->>Payment: POST /payments/:id/refund
-    Payment->>Gateway: refund()
-    Gateway-->>Payment: 201 (still CAPTURED for now)
-    Gateway--)Gateway: schedule webhook (~2s delay)
-    Gateway->>Payment: POST /webhooks/payments/fake<br/>(refund_succeeded)
-    Payment--)MQ: publish webhook.payment.process
-    MQ--)Payment: WebhookProcessorConsumer
-    Payment->>Payment: processWebhookEvent()<br/>applyTransition(→ REFUNDED or PARTIALLY_REFUNDED)
-
-    alt full refund
-        Note right of Payment: Kafka: payment.transaction.refunded.v1
-        Payment--)Order: markRefunded() → order.order.refunded.v1
-        Payment--)Bnpl: cancelPlanForRefund() → plan CANCELLED
-        Payment--)Notif: sends "payment_refunded" email
-    else partial refund
-        Note right of Payment: Kafka: payment.transaction.partially_refunded.v1
-        Payment--)Order: markPaymentIncident('PARTIALLY_REFUNDED')
-        Payment--)Bnpl: adjustPlanForPartialRefund() → plan ADJUSTED
-    end
-```
-
-A **full** refund (`.refunded.v1`) moves the order to `REFUNDED` (and clears
-any dispute/chargeback/partial-refund signal recorded on it). A **partial**
-refund doesn't change `Order.status` — it only mirrors onto
-`Order.paymentIncident` (`markPaymentIncident`), which the order's computed
-`paymentStatus` reads first, so the client sees `PARTIALLY_REFUNDED` instead
-of a stale `PAID`/`INSTALLMENTS_PENDING`. `bnpl-service` reacts to both, with
-a different method for each.
-
-### 3. Void, chargeback, and authorization failure (prose — single-service, no fan-out)
-
-- **Void** (`POST /payments/:id/void`, requires `AUTHORIZED`): calls
-  `PaymentGatewayPort.void()` synchronously (no webhook involved) →
-  `applyTransition(VOIDED)` → outbox → `payment.transaction.voided.v1`.
-  `order-service` reacts by cancelling the order (`cancelOrder()`, only from
-  `CREATED` — see below).
-- **Chargeback** (`POST /payments/:id/simulate-chargeback`, requires
-  `CAPTURED`/`PARTIALLY_REFUNDED`): a real chargeback is initiated by the
-  card network, not the merchant, so this endpoint deliberately **doesn't**
-  call `PaymentGatewayPort` at all — it fires two direct, sequential
-  transitions in the same request: `CAPTURED → DISPUTED`
-  (`dispute_opened.v1`) → `DISPUTED → CHARGEBACK` (`chargeback_received.v1`).
-  `bnpl-service` reacts by putting the plan on `DISPUTED_HOLD` and flagging
-  the credit profile for rescoring — without publishing any new event of its
-  own. `order-service` reacts to both topics by mirroring the signal onto
-  `Order.paymentIncident` (`markPaymentIncident`), so the order's computed
-  payment status reflects `DISPUTED`/`CHARGEBACK` instead of staying at
-  whatever it was when the order was last confirmed.
-- **Dispute resolved** (`POST /payments/:id/resolve-dispute`, requires
-  `DISPUTED`): the mirror image of opening a dispute — the card network
-  ruled in the merchant's favor, so this also bypasses `PaymentGatewayPort`
-  and fires a single direct transition, `DISPUTED → CAPTURED`
-  (`dispute_resolved.v1`). `bnpl-service` reacts by taking the plan off
-  `DISPUTED_HOLD` back to `ACTIVE`; `order-service` clears
-  `Order.paymentIncident` back to `null`, the same way a full refund does.
-- **Authorization failure**: if the synchronous `PaymentGatewayPort.authorize()`
-  call in `createPayment()` throws, `applyTransition(AUTHORIZATION_FAILED)`
-  still runs (outbox → `payment.transaction.authorization_failed.v1`) before
-  the original error is re-thrown to the caller — so `POST /payments` itself
-  returns an error even though the failed-state transition was durably
-  persisted and published. `order-service` reacts the same way it does to a
-  void: `cancelOrder()`, so the order doesn't sit at `CREATED` forever with
-  no payment behind it. Both reactions are idempotent no-ops for an order
-  that already moved past `CREATED` some other way (e.g. a retried payment
-  on the same order eventually captures).
-
-### 4. Notifications: Kafka → RabbitMQ → email (two hops, on purpose)
-
-`notification-service` separates *translating* the domain event (Kafka → `email.send` command, no retry, pure and testable logic) from *delivering* it (a RabbitMQ consumer with retry/DLQ that calls `EmailProviderPort`). This keeps the event→email mapping decoupled from retry/delivery concerns.
-
-### 5. Installment charging ("dunning"): poll → command → charge → react
-
-The only scheduled (not reactive) flow in the system — `bnpl-service`'s `InstallmentPollerService` runs `PollDueInstallmentsUseCase` hourly, finding every `Installment` in `PENDING`/`DUE` whose `dueDate` has passed.
-
-```mermaid
-sequenceDiagram
-    participant Cron as InstallmentPollerService
-    participant Bnpl as bnpl-service
-    participant MQ as RabbitMQ
-    participant Payment as payment-service
-    participant Gateway as FakePaymentGateway
-
-    Cron--)Bnpl: hourly tick
-    Bnpl->>Bnpl: PollDueInstallmentsUseCase<br/>find PENDING/DUE, dueDate <= now
-    loop each due installment
-        Bnpl->>Bnpl: ChargeDueInstallmentUseCase<br/>PENDING -> DUE (outbox bnpl.installment.due.v1)
-        Bnpl--)MQ: publish payment.charge_installment
-    end
-
-    MQ--)Payment: InstallmentChargeConsumer
-    Payment->>Gateway: authorize()
-    Payment->>Payment: chargeInstallment()<br/>new Transaction(installmentId), PENDING -> AUTHORIZED
-    Gateway--)Gateway: schedule webhook (~2s delay)
-    Gateway->>Payment: POST /webhooks/payments/fake
-    Payment--)MQ: publish webhook.payment.process
-    MQ--)Payment: WebhookProcessorConsumer
-    Payment->>Payment: AUTHORIZED -> CAPTURED (or CAPTURE_FAILED)
-    Note right of Payment: Kafka: payment.installment_charge.captured.v1<br/>(or .capture_failed.v1) — NOT the generic<br/>payment.transaction.captured.v1, so order-service/<br/>bnpl-service's original-payment reactions don't fire
-
-    Payment--)Bnpl: payment.installment_charge.captured.v1
-    Bnpl->>Bnpl: MarkInstallmentPaidUseCase -> PAID
-    Payment--)Bnpl: payment.installment_charge.capture_failed.v1
-    Bnpl->>Bnpl: MarkInstallmentFailedUseCase<br/>retryCount < 3: PENDING, dueDate += 3d<br/>retryCount >= 3: DEFAULTED + CreditProfile.blocked
-```
-
-An installment charge is its own `Transaction` row in payment-service (`installmentId` set, `orderId` shared with the order's original — now-terminal-only-in-the-sense-of-being-`CAPTURED`-forever — `Transaction`), going through the exact same state machine and `PaymentGatewayPort`. The two new topics exist specifically so bnpl-service's existing `PaymentEventsConsumer` (which reacts to the generic `payment.transaction.captured.v1` by re-activating a plan) never gets confused about which "capture" just happened. `retryCount`/`InstallmentStatus.DEFAULTED`/`CreditProfile.blocked` — all present in the schema since the beginning but unused until this flow — are now exercised: 3 failed charge attempts per installment before it defaults, 3 days between retries, and a default blocks the user from future plans without touching their other installments.
-
-## Repository pattern (swappable external providers)
-
-Each external integration is an abstract class (contract) + a DI token + a fake implementation, selected by an environment variable in a factory provider — switching to a real provider never touches consumer code:
-
-| Port | Service | Current implementation | Real future option |
-|---|---|---|---|
-| `PaymentGatewayPort` | payment-service | `FakePaymentGateway` | MercadoPago, PayPal |
-| `EmailProviderPort` | notification-service | `ConsoleEmailProvider` (just logs) | SendGrid, SES |
-| `TokenProviderPort` | auth-service | `JwtTokenProvider` | Auth0, Keycloak, Cognito |
+`packages/event-contracts/src/topics.ts` is the source of truth for the
+Kafka event catalog and the RabbitMQ topology if the docs above ever drift.
 
 ## Known gaps (deliberately deferred, not bugs)
 
