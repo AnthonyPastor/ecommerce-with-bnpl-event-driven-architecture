@@ -8,13 +8,7 @@ import type { PaginatedProducts } from '@lib/ecommerce-types';
 import { formatPrice } from '@lib/format';
 import { useAuthStore } from '@store/auth-store';
 import { Button } from '@components/Button';
-
-const STRIPES = {
-  backgroundColor: '#ffffff',
-  backgroundImage: 'repeating-linear-gradient(135deg, #fafafa 0 11px, #f2f2f4 11px 22px)',
-};
-
-const THUMB_LABELS = ['side', 'sole', 'back', 'detail'];
+import { ProductImage } from '@components/ProductImage';
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -94,30 +88,19 @@ export default function ProductDetailPage() {
       </div>
       <div className="flex flex-wrap items-start gap-14">
         <div className="flex min-w-[300px] flex-1 basis-[420px] flex-col gap-3">
-          <div
-            className="relative flex aspect-square items-center justify-center border border-[#f0f0f2]"
-            style={STRIPES}
+          <ProductImage
+            src={product.imageUrl}
+            alt={product.name}
+            className="aspect-square border border-[#f0f0f2]"
+            sizes="(min-width: 640px) 420px, 100vw"
+            fallbackLabel={`product shot · ${product.name.toLowerCase()}\n1:1 · white background`}
           >
-            <span className="whitespace-pre-line text-center font-mono text-[10px] uppercase leading-relaxed tracking-wide text-[#b8b8be]">
-              {`product shot · ${product.name.toLowerCase()}\n1:1 · white background`}
-            </span>
             {product.isPro && (
               <span className="absolute right-0 top-0 bg-accent px-[7px] py-[5px] font-mono text-[10px] font-semibold uppercase tracking-wide text-ink">
                 Pro
               </span>
             )}
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            {THUMB_LABELS.map((label) => (
-              <div
-                key={label}
-                className="flex aspect-square items-end justify-center border border-[#f0f0f2] pb-1.5"
-                style={{ backgroundColor: '#ffffff', backgroundImage: 'repeating-linear-gradient(135deg, #fbfbfb 0 7px, #f4f4f5 7px 14px)' }}
-              >
-                <span className="font-mono text-[8px] uppercase tracking-wide text-[#c4c4ca]">{label}</span>
-              </div>
-            ))}
-          </div>
+          </ProductImage>
         </div>
 
         <div className="flex min-w-[300px] flex-1 basis-[380px] flex-col gap-[22px]">

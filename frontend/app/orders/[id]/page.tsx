@@ -2,12 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useMemo } from 'react';
 import { bnplApi } from '@lib/bnpl-api';
 import { ecommerceApi } from '@lib/ecommerce-api';
 import { formatPrice } from '@lib/format';
 import { TERMINAL_PAYMENT_STATUSES } from '@lib/bnpl-types';
 import { useRequireAuth } from '@lib/use-require-auth';
+import { ProductImage } from '@components/ProductImage';
 
 const TX_LABELS: Record<string, { label: string; hint: string; dot: string; idx: number }> = {
   PENDING: { label: 'Payment started', hint: 'We sent the request to the gateway. This takes a few seconds.', dot: '#a16207', idx: 0 },
@@ -40,6 +41,20 @@ function OrderConfirmationContent() {
     queryKey: ['order', id],
     queryFn: () => ecommerceApi.getOrder(id),
   });
+
+  // Same query key/shape as the unfiltered catalog view (app/page.tsx) so
+  // this hits React Query's cache instead of refetching when the user just
+  // came from browsing the full catalog.
+  const productsQuery = useQuery({
+    queryKey: ['products', 'all'],
+    queryFn: () => ecommerceApi.getProducts({ page: 1, pageSize: 100 }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const imageByProductId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const p of productsQuery.data?.items ?? []) map.set(p.id, p.imageUrl);
+    return map;
+  }, [productsQuery.data]);
 
   // Visiting an already-CONFIRMED order with no ?tx= (e.g. from /orders) has
   // no transactionId to poll — resolve it from the order itself instead of
@@ -210,8 +225,14 @@ function OrderConfirmationContent() {
           <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em]">Order items</span>
         </div>
         {order.items.map((item) => (
-          <div key={item.id} className="flex justify-between gap-4 border-b border-[#f0f0f2] px-6 py-4">
-            <span className="flex flex-col gap-0.5">
+          <div key={item.id} className="flex items-center gap-3 border-b border-[#f0f0f2] px-6 py-4">
+            <ProductImage
+              src={imageByProductId.get(item.productId) ?? null}
+              alt={item.name}
+              className="h-14 w-14 shrink-0 border border-[#f0f0f2]"
+              sizes="56px"
+            />
+            <span className="flex flex-1 flex-col gap-0.5">
               <span className="text-sm font-semibold">{item.name}</span>
               <span className="font-mono text-[11px] text-[#71717a]">Qty {item.quantity}</span>
             </span>

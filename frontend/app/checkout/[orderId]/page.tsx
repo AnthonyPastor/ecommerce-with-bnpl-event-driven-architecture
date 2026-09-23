@@ -2,12 +2,13 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { bnplApi } from '@lib/bnpl-api';
 import { ecommerceApi } from '@lib/ecommerce-api';
 import { formatPrice } from '@lib/format';
 import { NON_BLOCKING_PAYMENT_STATUSES, type PaymentMethod } from '@lib/bnpl-types';
 import { useRequireAuth } from '@lib/use-require-auth';
+import { ProductImage } from '@components/ProductImage';
 
 const STEPS = ['Shipping', 'Plan', 'Review'];
 
@@ -35,6 +36,20 @@ export default function CheckoutPage() {
     queryKey: ['order', orderId],
     queryFn: () => ecommerceApi.getOrder(orderId),
   });
+
+  // Same query key/shape as the unfiltered catalog view (app/page.tsx) so
+  // this hits React Query's cache instead of refetching when the user just
+  // came from browsing the full catalog.
+  const productsQuery = useQuery({
+    queryKey: ['products', 'all'],
+    queryFn: () => ecommerceApi.getProducts({ page: 1, pageSize: 100 }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const imageByProductId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const p of productsQuery.data?.items ?? []) map.set(p.id, p.imageUrl);
+    return map;
+  }, [productsQuery.data]);
 
   // An order can already have a payment that's in flight (PENDING/AUTHORIZED)
   // or blocking (e.g. PARTIALLY_REFUNDED/DISPUTED) without being CONFIRMED yet
@@ -252,8 +267,14 @@ export default function CheckoutPage() {
               <h2 className="m-0 text-[26px] font-bold tracking-tight">Review and pay</h2>
               <div className="border border-hair">
                 {order.items.map((item) => (
-                  <div key={item.id} className="flex justify-between gap-4 border-b border-[#f0f0f2] px-5 py-4">
-                    <span className="flex flex-col gap-0.5">
+                  <div key={item.id} className="flex items-center gap-3 border-b border-[#f0f0f2] px-5 py-4">
+                    <ProductImage
+                      src={imageByProductId.get(item.productId) ?? null}
+                      alt={item.name}
+                      className="h-14 w-14 shrink-0 border border-[#f0f0f2]"
+                      sizes="56px"
+                    />
+                    <span className="flex flex-1 flex-col gap-0.5">
                       <span className="text-sm font-semibold">{item.name}</span>
                       <span className="font-mono text-[11px] text-[#71717a]">Qty {item.quantity}</span>
                     </span>
