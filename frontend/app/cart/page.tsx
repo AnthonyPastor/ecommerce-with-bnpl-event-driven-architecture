@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import { useMemo } from 'react';
 import { ecommerceApi } from '@lib/ecommerce-api';
 import { formatPrice } from '@lib/format';
 import { useRequireAuth } from '@lib/use-require-auth';
 import { Button } from '@components/Button';
+import { ProductImage } from '@components/ProductImage';
 
 type MutateArgs = { itemId: string; action: 'inc' | 'dec' | 'remove'; quantity: number };
 
@@ -19,6 +21,20 @@ export default function CartPage() {
     queryFn: () => ecommerceApi.getCart(user!.id),
     enabled: !!user,
   });
+
+  // Same query key/shape as the unfiltered catalog view (app/page.tsx) so
+  // this hits React Query's cache instead of refetching when the user just
+  // came from browsing the full catalog.
+  const productsQuery = useQuery({
+    queryKey: ['products', 'all'],
+    queryFn: () => ecommerceApi.getProducts({ page: 1, pageSize: 100 }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const imageByProductId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const p of productsQuery.data?.items ?? []) map.set(p.id, p.imageUrl);
+    return map;
+  }, [productsQuery.data]);
 
   const mutateItem = useMutation({
     mutationFn: ({ itemId, action, quantity }: MutateArgs) => {
@@ -79,9 +95,11 @@ export default function CartPage() {
               const busy = isBusy(item.id);
               return (
                 <div key={item.id} className="flex gap-[18px] border-t border-hair py-5" style={{ opacity: busy ? 0.55 : 1 }}>
-                  <div
+                  <ProductImage
+                    src={imageByProductId.get(item.productId) ?? null}
+                    alt={item.name}
                     className="h-[120px] w-24 shrink-0 border border-[#f0f0f2]"
-                    style={{ backgroundColor: '#ffffff', backgroundImage: 'repeating-linear-gradient(135deg, #fafafa 0 8px, #f2f2f4 8px 16px)' }}
+                    sizes="96px"
                   />
                   <div className="flex flex-1 flex-col gap-1.5">
                     <button

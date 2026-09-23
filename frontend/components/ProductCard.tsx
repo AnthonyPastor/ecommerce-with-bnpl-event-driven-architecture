@@ -7,11 +7,7 @@ import { formatPrice } from '@lib/format';
 import type { Product } from '@lib/ecommerce-types';
 import { useAuthStore } from '@store/auth-store';
 import { Button } from './Button';
-
-const STRIPES = {
-  backgroundColor: '#ffffff',
-  backgroundImage: 'repeating-linear-gradient(135deg, #fafafa 0 9px, #f2f2f4 9px 18px)',
-};
+import { ProductImage } from './ProductImage';
 
 export function ProductCard({ product }: { product: Product }) {
   const router = useRouter();
@@ -49,16 +45,13 @@ export function ProductCard({ product }: { product: Product }) {
   return (
     <div className="flex animate-vrise flex-col">
       <button onClick={openProduct} className="relative block w-full border border-white bg-white p-0">
-        <div className="flex aspect-[4/5] items-center justify-center" style={STRIPES}>
-          <span className="whitespace-pre-line px-3 text-center font-mono text-[9px] uppercase leading-relaxed tracking-wide text-[#b8b8be]">
-            {`product shot\n${product.name.toLowerCase()}\nwhite bg`}
-          </span>
-        </div>
-        {product.isPro && (
-          <span className="absolute right-0 top-0 bg-accent px-[7px] py-[5px] font-mono text-[10px] font-semibold uppercase tracking-wide text-ink">
-            Pro
-          </span>
-        )}
+        <ProductImage src={product.imageUrl} alt={product.name} className="aspect-[4/5]">
+          {product.isPro && (
+            <span className="absolute right-0 top-0 bg-accent px-[7px] py-[5px] font-mono text-[10px] font-semibold uppercase tracking-wide text-ink">
+              Pro
+            </span>
+          )}
+        </ProductImage>
       </button>
       <div className="flex flex-col gap-1 pt-3.5">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted">

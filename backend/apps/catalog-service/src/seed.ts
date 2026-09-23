@@ -57,6 +57,7 @@ async function seed() {
     categorySlug: string;
     stockOut: string[];
     isPro?: boolean;
+    imageUrl?: string;
   }> = [
     {
       name: 'Kinetic 1',
@@ -64,6 +65,7 @@ async function seed() {
       priceCents: 13900,
       categorySlug: 'running',
       stockOut: ['US 7'],
+      imageUrl: '/shoes/shoes-1.webp',
     },
     {
       name: 'Kinetic Pro Carbon',
@@ -72,6 +74,7 @@ async function seed() {
       categorySlug: 'running',
       stockOut: ['US 12'],
       isPro: true,
+      imageUrl: '/shoes/shoes-pro.webp',
     },
     {
       name: 'Kinetic Rebound',
@@ -79,6 +82,7 @@ async function seed() {
       priceCents: 16900,
       categorySlug: 'running',
       stockOut: [],
+      imageUrl: '/shoes/shoes-2.webp',
     },
     {
       name: 'Trace Court Low',
@@ -86,6 +90,7 @@ async function seed() {
       priceCents: 9900,
       categorySlug: 'lifestyle',
       stockOut: ['US 8', 'US 11'],
+      imageUrl: '/shoes/shoes-3.webp',
     },
     {
       name: 'Trace Court High',
@@ -93,6 +98,7 @@ async function seed() {
       priceCents: 11900,
       categorySlug: 'lifestyle',
       stockOut: [],
+      imageUrl: '/shoes/shoes-4.webp',
     },
     {
       name: 'Pulse Street 90',
@@ -100,6 +106,7 @@ async function seed() {
       priceCents: 10900,
       categorySlug: 'lifestyle',
       stockOut: ['US 7'],
+      imageUrl: '/shoes/shoes-5.webp',
     },
     {
       name: 'Studio Knit Slip',
@@ -107,6 +114,7 @@ async function seed() {
       priceCents: 7900,
       categorySlug: 'lifestyle',
       stockOut: [],
+      imageUrl: '/shoes/shoes-6.webp',
     },
     {
       name: 'Drift Trail GTX',
@@ -114,6 +122,7 @@ async function seed() {
       priceCents: 17900,
       categorySlug: 'trail',
       stockOut: ['US 9'],
+      imageUrl: '/shoes/shoes-7.webp',
     },
     {
       name: 'Ridge Trail 2',
@@ -121,6 +130,7 @@ async function seed() {
       priceCents: 15900,
       categorySlug: 'trail',
       stockOut: [],
+      imageUrl: '/shoes/shoes-8.webp',
     },
     {
       name: 'Arena Court Pro',
@@ -128,15 +138,18 @@ async function seed() {
       priceCents: 12900,
       categorySlug: 'court',
       stockOut: ['US 10'],
+      imageUrl: '/shoes/shoes-9.webp',
     },
   ];
 
   for (const data of productsData) {
     const isPro = data.isPro ?? false;
+    const imageUrl = data.imageUrl ?? null;
     const existing = await productRepo.findOne({ where: { name: data.name } });
     if (existing) {
-      if (existing.isPro !== isPro) {
+      if (existing.isPro !== isPro || existing.imageUrl !== imageUrl) {
         existing.isPro = isPro;
+        existing.imageUrl = imageUrl;
         await productRepo.save(existing);
       }
       continue;
@@ -148,7 +161,7 @@ async function seed() {
         description: data.description,
         priceCents: data.priceCents,
         category: categoriesBySlug.get(data.categorySlug) ?? null,
-        imageUrl: null,
+        imageUrl,
         isPro,
       }),
     );
