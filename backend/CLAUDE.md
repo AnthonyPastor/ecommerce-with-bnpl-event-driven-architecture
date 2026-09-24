@@ -16,6 +16,9 @@ pnpm install
 pnpm infra:up
 pnpm infra:down
 
+# all 8 services at once (parallel, one terminal, output prefixed per package)
+pnpm dev
+
 # one service (from this folder, backend/)
 pnpm --filter <service> start:dev     # e.g. pnpm --filter order-service start:dev
 pnpm --filter <service> build
