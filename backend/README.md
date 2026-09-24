@@ -40,7 +40,8 @@ there are no cross-imports between services; anything shared lives in
 ```bash
 pnpm install
 pnpm infra:up                                   # Postgres, Kafka, RabbitMQ, Redis, Adminer
-pnpm --filter <service> start:dev                # one terminal per service
+pnpm dev                                        # all 8 services at once, one terminal
+# or: pnpm --filter <service> start:dev          # one service, one terminal
 pnpm --filter catalog-service run seed           # once, with catalog-service up
 ```
 

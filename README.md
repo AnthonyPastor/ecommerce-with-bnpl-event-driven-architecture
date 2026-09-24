@@ -277,7 +277,14 @@ pnpm install                  # in backend/
 cd ../frontend && pnpm install
 ```
 
-### Start a service
+### Start all services at once
+
+```bash
+pnpm dev
+```
+
+Runs all 8 backend services in parallel in a single terminal, each line
+prefixed with its package name. To run just one instead:
 
 ```bash
 pnpm --filter <service-name> start:dev

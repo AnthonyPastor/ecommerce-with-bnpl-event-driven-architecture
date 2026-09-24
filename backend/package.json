@@ -7,6 +7,7 @@
     "test": "pnpm -r --filter=./apps/** run test",
     "test:e2e": "pnpm --filter e2e run test",
     "lint": "pnpm -r --filter=./apps/** run lint",
+    "dev": "pnpm -r --parallel --filter=./apps/** run start:dev",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down"
   },
